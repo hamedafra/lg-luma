@@ -234,6 +234,8 @@ pub struct State {
     pub home_scroll: f32,
     /// Sideways offset of the Home inputs strip.
     pub input_scroll: f32,
+    /// When the pointer started resting on a strip's edge zone (its arrow).
+    pub edge_hover: Option<Instant>,
     pub overlay: Option<Overlay>,
     pub moving: Option<String>,
     pub loading: bool,
@@ -283,6 +285,7 @@ impl State {
             scroll: 0.,
             home_scroll: 0.,
             input_scroll: 0.,
+            edge_hover: None,
             overlay: None,
             moving: None,
             loading: false,
@@ -921,8 +924,39 @@ impl State {
     }
 
     /// Hover and pointer-down must not move the control before pointer-up.
+    /// Resting the pointer on a strip's edge scrolls it, like LG's launcher bar: after a short
+    /// pause, at a steady speed, until the strip ends or the pointer leaves.
+    pub fn edge_scrolling(&self) -> bool {
+        const DWELL: Duration = Duration::from_millis(250);
+        self.pointer
+            && self.page == Page::Home
+            && self.overlay.is_none()
+            && self
+                .edge_hover
+                .is_some_and(|since| since.elapsed() >= DWELL)
+            && matches!(self.focus, Target::StripArrow { inputs, forward }
+                if self.strip_can_scroll(inputs, forward))
+    }
+
+    pub fn edge_scroll(&mut self, dt: f32) {
+        const SPEED: f32 = 900.;
+        if !self.edge_scrolling() {
+            return;
+        }
+        if let Target::StripArrow { inputs, forward } = self.focus {
+            let delta = SPEED * dt * if forward { 1. } else { -1. };
+            if inputs {
+                self.scroll_inputs(delta);
+            } else {
+                self.scroll_favorites(delta);
+            }
+        }
+    }
+
     /// The pointer moved over empty space: show pointer-only controls such as strip arrows.
     pub fn pointer_moved(&mut self) {
+        // Leaving an edge zone for empty space stops edge scrolling.
+        self.edge_hover = None;
         if !self.pointer {
             self.pointer = true;
             self.dirty = true;
@@ -937,6 +971,7 @@ impl State {
         if self.focus == target {
             return;
         }
+        self.edge_hover = matches!(target, Target::StripArrow { .. }).then(Instant::now);
         if let Target::Sidebar(section) = target {
             if self.subpage == Some(Subpage::WeatherLocation) {
                 self.weather.cancel_search();
@@ -1177,6 +1212,7 @@ impl State {
 
     pub fn direction(&mut self, direction: Direction, controls: &[Control]) -> Vec<Effect> {
         self.pointer = false;
+        self.edge_hover = None;
         self.dirty = true;
         if self.recents_open() {
             return self.recent_direction(direction);

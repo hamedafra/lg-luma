@@ -1752,6 +1752,9 @@ fn run() -> Result<(), String> {
         }
         let dt = last_frame.elapsed().as_secs_f32().min(0.1);
         last_frame = Instant::now();
+        if focused && visible && state.edge_scrolling() {
+            state.edge_scroll(dt);
+        }
         let navigation = view::navigation(&assets, state.preferences.language);
         let target = navigation.items[state.page_index()].x;
         let target_width = navigation.items[state.page_index()].w;
@@ -1935,6 +1938,7 @@ fn run() -> Result<(), String> {
         } else if pill != target
             || pill_width != target_width
             || state.animating()
+            || state.edge_scrolling()
             || options.profile_frames.is_some()
         {
             0

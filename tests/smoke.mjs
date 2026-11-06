@@ -362,7 +362,7 @@ try {
   assert.deepEqual(clockFocus.focus, { Choice: 1 });
   const system = await scenario(
     'system-settings',
-    'settings,down,down,down,down,right,down,down,down',
+    'settings,down,down,down,down,right,down,down,down,down',
   );
   assert.deepEqual(system.focus, { Setting: 5 });
   assert.ok(system.ui_text.includes('Refresh apps & inputs'));
@@ -401,23 +401,24 @@ try {
   const textOptions = 'settings,down,down,down,down,right,down,down,enter';
   const textRendering = await scenario('text-rendering-options', textOptions);
   assert.equal(textRendering.subpage, 'TextRendering');
-  assert.deepEqual(textRendering.focus, { Choice: 0 });
-  assert.ok(textRendering.ui_text.includes('MSAA (default)'));
-  assert.ok(textRendering.ui_text.includes('Analytic'));
+  // This fork defaults to Analytic (Choice 1).
+  assert.deepEqual(textRendering.focus, { Choice: 1 });
+  assert.ok(textRendering.ui_text.includes('MSAA'));
+  assert.ok(textRendering.ui_text.includes('Analytic (default)'));
   assert.ok(textRendering.ui_text.includes('Restart Luma to apply changes.'));
+  const msaaSaved = await scenario('text-rendering-msaa-saved', `${textOptions},up,enter`);
+  assert.equal(msaaSaved.preferences.text_rendering, 'msaa');
+  assert.deepEqual(msaaSaved.focus, { Setting: 7 });
+  assert.equal(msaaSaved.render.text_rendering.mode, 'analytic', 'Mode changes apply next launch');
+  const msaa = await scenario('text-rendering-msaa', 'home,down');
+  assert.equal(msaa.render.text_rendering.mode, 'msaa');
+  assert.equal(msaa.render.text_rendering.embolden, 0);
   const analyticSaved = await scenario('text-rendering-saved', `${textOptions},down,enter`);
   assert.equal(analyticSaved.preferences.text_rendering, 'analytic');
-  assert.deepEqual(analyticSaved.focus, { Setting: 7 });
-  assert.equal(analyticSaved.render.text_rendering.mode, 'msaa', 'Mode changes apply next launch');
   const analytic = await scenario('text-rendering-analytic', 'home,down');
   assert.equal(analytic.render.text_rendering.mode, 'analytic');
   assert.equal(analytic.render.text_rendering.embolden, 0.25);
   assert.equal(analytic.render.last_presented.multisample_samples, 0);
-  const msaaSaved = await scenario('text-rendering-msaa-saved', `${textOptions},up,enter`);
-  assert.equal(msaaSaved.preferences.text_rendering, 'msaa');
-  const msaa = await scenario('text-rendering-msaa', 'home,down');
-  assert.equal(msaa.render.text_rendering.mode, 'msaa');
-  assert.equal(msaa.render.text_rendering.embolden, 0);
   // Companion HTTP writes are covered by loopback Rust tests. Seed its persisted result
   // here to render the TV's read-only detail/removal flow without a TV keyboard editor.
   const beforeShortcut = JSON.parse(await fs.readFile(preferences, 'utf8'));

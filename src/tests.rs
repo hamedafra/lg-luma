@@ -186,9 +186,12 @@ fn favorites_edge_fragments_share_draw_hit_and_wheel_viewports() {
     assert_eq!(state.scroll, 0.);
     assert_eq!(
         state.hit_test(&controls(&state), 10., 664.),
-        Some(Target::App(favorites[0].clone()))
+        Some(Target::StripArrow {
+            inputs: false,
+            forward: false
+        })
     );
-    // With the pointer in use, the page arrow covers most of the scrolled-away fragment.
+    // With the pointer in use, the left margin is the strip's scroll zone, fragment included.
     assert_eq!(
         state.hit_test(&controls(&state), 40., 664.),
         Some(Target::StripArrow {
@@ -199,8 +202,21 @@ fn favorites_edge_fragments_share_draw_hit_and_wheel_viewports() {
     let scroll = state.home_scroll;
     state.pointer_focus(Target::App(favorites[0].clone()));
     assert_eq!(state.home_scroll, scroll);
-    assert!(state.hit_test(&controls(&state), 4., 664.).is_none());
-    assert!(state.hit_test(&controls(&state), 1915., 664.).is_none());
+    // The screen edges beside the strip are its scroll zones while the pointer is in use.
+    assert_eq!(
+        state.hit_test(&controls(&state), 4., 664.),
+        Some(Target::StripArrow {
+            inputs: false,
+            forward: false
+        })
+    );
+    assert_eq!(
+        state.hit_test(&controls(&state), 1915., 664.),
+        Some(Target::StripArrow {
+            inputs: false,
+            forward: true
+        })
+    );
     assert!(state.hit_test(&controls(&state), 40., 1060.).is_none());
     let scene = scene(&state);
     let viewport = state.favorites_viewport();
@@ -3416,4 +3432,45 @@ fn pointer_page_arrows_scroll_home_strips_and_never_take_remote_focus() {
         state.direction(Direction::Down, &controls(&state));
         assert!(!matches!(state.focus, Target::StripArrow { .. }));
     }
+}
+
+#[test]
+fn resting_the_pointer_at_a_strip_edge_scrolls_it_even_in_the_screen_corner() {
+    let mut state = ready();
+    let favorites: Vec<_> = state
+        .inventory
+        .apps
+        .iter()
+        .take(12)
+        .map(|app| app.id.clone())
+        .collect();
+    state.preferences.favorites = Some(favorites);
+    state.pointer_moved();
+    let tile_y = controls(&state)
+        .into_iter()
+        .find(|c| matches!(c.target, Target::App(_)))
+        .unwrap()
+        .rect
+        .center()
+        .1;
+    // An air mouse pushed against the right screen edge still lands in the zone.
+    let right = Target::StripArrow {
+        inputs: false,
+        forward: true,
+    };
+    assert_eq!(
+        state.hit_test(&controls(&state), 1919., tile_y),
+        Some(right.clone())
+    );
+    state.pointer_focus(right);
+    assert!(!state.edge_scrolling(), "short pause before scrolling");
+    state.edge_hover = Some(std::time::Instant::now() - std::time::Duration::from_millis(300));
+    assert!(state.edge_scrolling());
+    state.edge_scroll(0.1);
+    assert!((state.home_scroll - 90.).abs() < 0.01);
+    // Leaving the zone for empty space stops it.
+    state.pointer_moved();
+    assert!(!state.edge_scrolling());
+    state.edge_scroll(0.1);
+    assert!((state.home_scroll - 90.).abs() < 0.01);
 }

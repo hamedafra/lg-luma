@@ -1393,6 +1393,18 @@ fn strip_arrows(out: &mut Scene, state: &State, assets: &Assets, inputs: bool, c
         }
         let target = Target::StripArrow { inputs, forward };
         let rect = Rect::new(center_x - SIZE / 2., center_y - SIZE / 2., SIZE, SIZE);
+        // The whole margin out to the screen edge reacts, since an air mouse is easily pushed
+        // into the corner; the visible button stays small.
+        let zone = if forward {
+            Rect::new(
+                HOME_STRIP_RIGHT + 88.,
+                center_y - 80.,
+                1920. - HOME_STRIP_RIGHT - 88.,
+                160.,
+            )
+        } else {
+            Rect::new(0., center_y - 80., HOME_STRIP_LEFT, 160.)
+        };
         let focused = state.focus == target;
         out.shadow(rect, SIZE / 2., 18., 6., 0.35);
         out.shape(
@@ -1419,7 +1431,7 @@ fn strip_arrows(out: &mut Scene, state: &State, assets: &Assets, inputs: bool, c
                 c(0xf3f3f3, 1.)
             },
         );
-        out.control(target, rect, false);
+        out.control(target, zone, false);
     }
     out.draw.push(Draw::Clip(Some(content)));
 }
