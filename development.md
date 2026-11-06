@@ -397,9 +397,15 @@ draws with a texture-free GLES2 shader. No SVG parser runs on the TV. The shared
 handles font outlines. Installed app PNG/JPEG/WebP artwork, wallpaper photos, tile-background
 images and the webOS installation icon remain raster assets. See [assets.md](assets.md) for licenses.
 
-TV and desktop windows default to 4× MSAA with 2×/single-sample fallbacks and no text
-emboldening, restoring the text treatment used in v2.8.0. **Settings → System → Text rendering**
-offers **MSAA (default)** and **Analytic**. The `text_rendering` preference (`msaa` or `analytic`)
+This fork defaults to **Analytic**: on an LG C5 (webOS 25) a 4× MSAA capture showed only three
+intermediate coverage levels on text edges, which the panel's 2× upscale turns into visible
+steps. **Settings → System → Text rendering** offers **MSAA** (4× with 2×/single-sample
+fallbacks, no emboldening) and **Analytic (default)**.
+
+**Font hinting** (Settings → System, on by default) grid-fits each glyph with skrifa's automatic
+hinter (FreeType `NORMAL` equivalent) at its physical pixel size; glyph geometry and text runs are
+cached per size and density while it is on. `LUMA_HINTING=off|light|normal` overrides the saved
+choice for hardware comparisons. The `text_rendering` preference (`msaa` or `analytic`)
 is saved immediately and applies when Luma next starts because SDL selects MSAA when it creates
 the window. Missing or invalid preferences use MSAA. The setting shows a restart reminder.
 

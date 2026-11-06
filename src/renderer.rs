@@ -101,6 +101,7 @@ struct TextKey {
     // Logical size, tracking, line height, available width and height.
     layout: [u32; 5],
     flags: u8,
+    density: u32,
 }
 
 struct TextRun {
@@ -335,7 +336,9 @@ pub struct Renderer {
     font_directory: PathBuf,
     fonts: HashMap<u16, Font>,
     failed_fonts: HashSet<u16>,
-    glyphs: HashMap<(char, u16), Glyph>,
+    /// Character, font and hinted physical size in 1/64 px (0 when unhinted).
+    glyphs: HashMap<(char, u16, u32), Glyph>,
+    hinting: crate::font::Hinting,
     text_runs: HashMap<TextKey, TextRun>,
     textures: HashMap<String, Option<Texture>>,
     vectors: HashMap<String, Option<vector::Mesh>>,
@@ -457,6 +460,7 @@ impl Renderer {
             fonts,
             failed_fonts: HashSet::new(),
             glyphs: HashMap::new(),
+            hinting: crate::font::Hinting::Off,
             text_runs: HashMap::new(),
             textures: HashMap::new(),
             vectors: HashMap::new(),
@@ -498,11 +502,36 @@ impl Renderer {
         }
     }
 
-    fn glyph(&mut self, c: char, font: u16) -> Result<&[luma_vector_geometry::Vertex], String> {
-        let key = (c, font);
+    /// Switching grid fitting rebuilds every glyph and text run on next use.
+    pub fn set_hinting(&mut self, hinting: crate::font::Hinting) -> bool {
+        if self.hinting == hinting {
+            return false;
+        }
+        self.hinting = hinting;
+        self.glyphs.clear();
+        self.text_runs.clear();
+        true
+    }
+
+    fn glyph(
+        &mut self,
+        c: char,
+        font: u16,
+        ppem: f32,
+    ) -> Result<&[luma_vector_geometry::Vertex], String> {
+        let hinted = self.hinting != crate::font::Hinting::Off;
+        let key = (
+            c,
+            font,
+            if hinted {
+                (ppem * 64.).round() as u32
+            } else {
+                0
+            },
+        );
         if !self.glyphs.contains_key(&key) {
             let started = Instant::now();
-            let geometry = self.fonts[&font].geometry(c)?;
+            let geometry = self.fonts[&font].geometry_at(c, ppem, self.hinting)?;
             self.stats.glyph_ms += started.elapsed().as_secs_f64() * 1000.;
             self.glyphs.insert(
                 key,
@@ -740,7 +769,14 @@ impl Renderer {
             ],
             flags: u8::from(style.align_right)
                 | (u8::from(centered) << 1)
-                | (u8::from(self.stats.multisample_samples > 1) << 2),
+                | (u8::from(self.stats.multisample_samples > 1) << 2)
+                | ((self.hinting as u8) << 3),
+            // Hinted outlines fit one pixel grid, so a run belongs to one density.
+            density: if self.hinting == crate::font::Hinting::Off {
+                0
+            } else {
+                viewport.text_scale().to_bits()
+            },
         };
         if self.text_runs.contains_key(&key) {
             self.submit_text(key, origin, color);
@@ -873,11 +909,12 @@ impl Renderer {
         let mut missing_glyphs = 0;
         let mut failures = 0;
         let multisampled = self.stats.multisample_samples > 1;
+        let ppem = size_f * viewport.text_scale();
         for (c, x, baseline, selected) in placed {
             if self.fonts[&selected].lookup_glyph_index(c) == 0 && !c.is_whitespace() {
                 missing_glyphs += 1;
             }
-            match self.glyph(c, selected) {
+            match self.glyph(c, selected, ppem) {
                 Ok(geometry) => {
                     for triangle in geometry.chunks_exact(3) {
                         // True sample coverage needs only the original fill.

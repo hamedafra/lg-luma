@@ -253,6 +253,8 @@ pub struct Preferences {
     pub wallpaper_changed: u64,
     /// Quiet clicks when the remote moves focus or selects.
     pub ui_sounds: bool,
+    /// Grid-fit glyph outlines to the TV's 1080p pixel grid.
+    pub text_hinting: bool,
 }
 
 impl Default for Preferences {
@@ -284,6 +286,7 @@ impl Default for Preferences {
             wallpaper_gradient: true,
             wallpaper_changed: 0,
             ui_sounds: true,
+            text_hinting: true,
         }
     }
 }

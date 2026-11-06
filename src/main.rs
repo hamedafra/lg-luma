@@ -832,6 +832,7 @@ fn run() -> Result<(), String> {
     if let Err(error) = video.gl_set_swap_interval(1) {
         eprintln!("VSync: {error}");
     }
+    let hinting_override = std::env::var("LUMA_HINTING").ok();
     let mut renderer =
         renderer::Renderer::new(&assets.root.join("font.ttf"), webos, text_config.embolden)?;
     startup_stage("renderer");
@@ -1508,6 +1509,8 @@ fn run() -> Result<(), String> {
                     let hovered = hit(&scene.controls, &window, x, y, &state);
                     if let Some(target) = hovered.clone() {
                         state.pointer_focus(target);
+                    } else {
+                        state.pointer_moved();
                     }
                     if press
                         .as_ref()
@@ -1539,8 +1542,11 @@ fn run() -> Result<(), String> {
                                 pointer: true,
                             });
                         }
-                    } else if mouse_btn == MouseButton::Left {
-                        press = None;
+                    } else {
+                        state.pointer_moved();
+                        if mouse_btn == MouseButton::Left {
+                            press = None;
+                        }
                     }
                 }
                 Event::MouseButtonUp {
@@ -1770,6 +1776,14 @@ fn run() -> Result<(), String> {
             let compose_ms = compose_started.elapsed().as_secs_f64() * 1000.;
             let (width, height) = window.drawable_size();
             if width > 0 && height > 0 {
+                // Changed grid fitting alters every run, not just the changed commands.
+                let rehinted = renderer.set_hinting(font::Hinting::from_env(
+                    state.preferences.text_hinting,
+                    hinting_override.as_deref(),
+                ));
+                if rehinted {
+                    damage_tracker.reset();
+                }
                 if final_frame && let Some(path) = &options.screenshot {
                     captured = Some(renderer.capture(
                         &scene.draw,

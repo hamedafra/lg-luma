@@ -3808,5 +3808,20 @@
     "vi": "Âm thanh điều hướng",
     "nl": "Navigatiegeluiden",
     "sv": "Navigeringsljud"
+  },
+  "fontHinting": {
+    "zh-tw": "字型微調",
+    "en": "Font hinting",
+    "de": "Font-Hinting",
+    "es": "Ajuste de fuentes",
+    "zh": "字体微调",
+    "pt": "Ajuste de fontes",
+    "it": "Hinting dei caratteri",
+    "ru": "Хинтинг шрифтов",
+    "pl": "Hinting czcionek",
+    "fr": "Hinting des polices",
+    "vi": "Căn chỉnh phông chữ",
+    "nl": "Font-hinting",
+    "sv": "Teckensnittshinting"
   }
 }

@@ -63,6 +63,12 @@ pub enum Target {
     App(String),
     Input(String),
     Browse,
+    /// Pointer-only page buttons at the ends of a Home strip (favourites or inputs), like the
+    /// arrows LG's launcher shows for the Magic Remote and air mice without a wheel.
+    StripArrow {
+        inputs: bool,
+        forward: bool,
+    },
     Filter(usize),
     ClearFilter,
     Search,
@@ -660,6 +666,48 @@ impl State {
         favorites
     }
 
+    /// Whether a Home strip has hidden cards in that direction.
+    pub fn strip_can_scroll(&self, inputs: bool, forward: bool) -> bool {
+        let (scroll, max) = if inputs {
+            (self.input_scroll, self.inputs_max_scroll())
+        } else {
+            (self.home_scroll, self.favorites_max_scroll())
+        };
+        if forward {
+            scroll < max - 0.5
+        } else {
+            scroll > 0.5
+        }
+    }
+
+    fn favorites_max_scroll(&self) -> f32 {
+        let count = self
+            .preferences
+            .favorites(&self.inventory.apps)
+            .iter()
+            .filter(|id| {
+                !self.preferences.hidden.contains(id)
+                    && self.inventory.apps.iter().any(|app| &app.id == *id)
+            })
+            .count();
+        let content = if count == 0 {
+            0.
+        } else {
+            (count - 1) as f32 * HOME_TILE_PITCH + HOME_TILE_WIDTH
+        };
+        (content - (HOME_STRIP_RIGHT - HOME_STRIP_LEFT)).max(0.)
+    }
+
+    fn inputs_max_scroll(&self) -> f32 {
+        let count = self.home_inputs().len();
+        let content = if count == 0 {
+            0.
+        } else {
+            (count - 1) as f32 * INPUT_PITCH + INPUT_CARD_WIDTH
+        };
+        (content - (HOME_STRIP_RIGHT - HOME_STRIP_LEFT)).max(0.)
+    }
+
     pub fn scroll_favorites(&mut self, delta: f32) {
         let count = self
             .preferences
@@ -873,6 +921,14 @@ impl State {
     }
 
     /// Hover and pointer-down must not move the control before pointer-up.
+    /// The pointer moved over empty space: show pointer-only controls such as strip arrows.
+    pub fn pointer_moved(&mut self) {
+        if !self.pointer {
+            self.pointer = true;
+            self.dirty = true;
+        }
+    }
+
     pub fn pointer_focus(&mut self, target: Target) {
         if !self.pointer {
             self.dirty = true;
@@ -1159,6 +1215,11 @@ impl State {
                     return vec![Effect::Save];
                 }
             }
+            return vec![];
+        }
+        if matches!(self.focus, Target::StripArrow { .. }) {
+            // Remote keys leave the pointer's page buttons for the strip's first visible card.
+            self.focus(self.first_content(), controls);
             return vec![];
         }
         if self.overlay.is_none() {
@@ -1643,6 +1704,7 @@ impl State {
         let next = controls
             .iter()
             .filter(|candidate| candidate.target != self.focus)
+            .filter(|candidate| !matches!(candidate.target, Target::StripArrow { .. }))
             .filter(|candidate| {
                 self.page != Page::Home
                     || !matches!(candidate.target, Target::App(_) | Target::Input(_))
@@ -2079,6 +2141,21 @@ impl State {
         match self.focus.clone() {
             Target::Nav(index) => self.open(index),
             Target::Browse => self.open(1),
+            Target::StripArrow { inputs, forward } => {
+                // A page minus one card, so the last visible card stays as context.
+                let page = if inputs {
+                    3. * INPUT_PITCH
+                } else {
+                    5. * HOME_TILE_PITCH
+                };
+                let delta = if forward { page } else { -page };
+                if inputs {
+                    self.scroll_inputs(delta);
+                } else {
+                    self.scroll_favorites(delta);
+                }
+                return vec![];
+            }
             Target::Retry => return vec![Effect::Reload],
             Target::DismissNotice => self.notice = None,
             Target::CloseDialog => return self.back(),
@@ -2323,6 +2400,7 @@ impl State {
                     }
                     2 => self.preferences.reduced_motion = !self.preferences.reduced_motion,
                     8 => self.preferences.ui_sounds = !self.preferences.ui_sounds,
+                    9 => self.preferences.text_hinting = !self.preferences.text_hinting,
                     4 => {
                         self.subpage = Some(Subpage::Language);
                         self.focus = Target::Choice(self.preferences.language.index());

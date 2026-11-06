@@ -178,26 +178,34 @@ fn favorites_edge_fragments_share_draw_hit_and_wheel_viewports() {
         .collect();
     state.preferences.favorites = Some(favorites.clone());
     assert_eq!(
-        state.hit_test(&controls(&state), 1860., 600.),
+        state.hit_test(&controls(&state), 1860., 664.),
         Some(Target::App(favorites[6].clone()))
     );
-    assert!(state.wheel_scroll(&controls(&state), Some((1860., 600.)), 0, -1));
+    assert!(state.wheel_scroll(&controls(&state), Some((1860., 664.)), 0, -1));
     assert!((state.home_scroll - crate::state::HOME_TILE_PITCH).abs() < 0.01);
     assert_eq!(state.scroll, 0.);
     assert_eq!(
-        state.hit_test(&controls(&state), 40., 600.),
+        state.hit_test(&controls(&state), 10., 664.),
         Some(Target::App(favorites[0].clone()))
+    );
+    // With the pointer in use, the page arrow covers most of the scrolled-away fragment.
+    assert_eq!(
+        state.hit_test(&controls(&state), 40., 664.),
+        Some(Target::StripArrow {
+            inputs: false,
+            forward: false
+        })
     );
     let scroll = state.home_scroll;
     state.pointer_focus(Target::App(favorites[0].clone()));
     assert_eq!(state.home_scroll, scroll);
-    assert!(state.hit_test(&controls(&state), 4., 600.).is_none());
-    assert!(state.hit_test(&controls(&state), 1915., 600.).is_none());
+    assert!(state.hit_test(&controls(&state), 4., 664.).is_none());
+    assert!(state.hit_test(&controls(&state), 1915., 664.).is_none());
     assert!(state.hit_test(&controls(&state), 40., 1060.).is_none());
     let scene = scene(&state);
     let viewport = state.favorites_viewport();
     assert!(scene.draw.iter().any(|draw| matches!(draw, crate::renderer::Draw::Clip(Some(rect)) if rect.x == viewport.x && rect.w == viewport.w)));
-    assert!(state.wheel_scroll(&scene.controls, Some((40., 600.)), 0, 1));
+    assert!(state.wheel_scroll(&scene.controls, Some((40., 664.)), 0, 1));
     assert_eq!(state.home_scroll, 0.);
     assert_eq!(state.scroll, 0.);
 }
@@ -928,6 +936,11 @@ fn system_category_owns_refresh_and_quit_and_restores_sidebar_focus() {
     state.direction(Direction::Down, &controls(&state));
     assert_eq!(state.focus, Target::Setting(7));
     state.direction(Direction::Down, &controls(&state));
+    assert_eq!(state.focus, Target::Setting(9));
+    assert!(state.preferences.text_hinting);
+    assert_eq!(state.activate(), vec![Effect::Save]);
+    assert!(!state.preferences.text_hinting);
+    state.direction(Direction::Down, &controls(&state));
     assert_eq!(state.focus, Target::Setting(5));
     assert_eq!(state.activate(), vec![Effect::Quit]);
     state.back();
@@ -938,7 +951,7 @@ fn system_category_owns_refresh_and_quit_and_restores_sidebar_focus() {
 }
 
 #[test]
-fn text_rendering_preferences_default_to_msaa_and_recover_invalid_values() {
+fn text_rendering_preferences_default_to_analytic_and_recover_invalid_values() {
     use crate::text_rendering::TextRendering;
     for value in [
         json!({}),
@@ -949,7 +962,7 @@ fn text_rendering_preferences_default_to_msaa_and_recover_invalid_values() {
         let mut value = value;
         value["greeting_name"] = json!("Ana");
         let preferences: Preferences = serde_json::from_value(value).unwrap();
-        assert_eq!(preferences.text_rendering, TextRendering::Msaa);
+        assert_eq!(preferences.text_rendering, TextRendering::Analytic);
         assert_eq!(preferences.greeting_name, "Ana");
     }
 }
@@ -958,6 +971,7 @@ fn text_rendering_preferences_default_to_msaa_and_recover_invalid_values() {
 fn text_rendering_choices_persist_and_back_restores_the_system_row() {
     use crate::{state::Subpage, text_rendering::TextRendering};
     let mut state = ready();
+    state.preferences.text_rendering = TextRendering::Msaa;
     state.open(2);
     state.section = crate::state::SYSTEM_SECTION;
     state.focus = Target::Setting(7);
@@ -3326,4 +3340,80 @@ fn home_inputs_form_one_sideways_strip_of_four_like_the_favorites() {
     state.inventory.inputs.truncate(2);
     state.reconcile_focus();
     assert_eq!(state.input_scroll, 0.);
+}
+
+#[test]
+fn pointer_page_arrows_scroll_home_strips_and_never_take_remote_focus() {
+    use crate::state::{Direction, HOME_TILE_PITCH, INPUT_PITCH};
+    let mut state = ready();
+    let favorites: Vec<_> = state
+        .inventory
+        .apps
+        .iter()
+        .take(12)
+        .map(|app| app.id.clone())
+        .collect();
+    state.preferences.favorites = Some(favorites);
+    state.inventory.inputs = (1..=6)
+        .map(|n| crate::model::Input {
+            id: format!("HDMI_{n}"),
+            title: format!("HDMI {n}"),
+            port: format!("HDMI {n}"),
+            connected: Some(true),
+            signal: None,
+        })
+        .collect();
+    let arrows = |state: &State| -> Vec<Target> {
+        controls(state)
+            .into_iter()
+            .filter(|c| matches!(c.target, Target::StripArrow { .. }))
+            .map(|c| c.target)
+            .collect()
+    };
+    // Remote use shows no arrows.
+    assert!(arrows(&state).is_empty());
+    state.pointer = true;
+    let favorites_right = Target::StripArrow {
+        inputs: false,
+        forward: true,
+    };
+    let inputs_right = Target::StripArrow {
+        inputs: true,
+        forward: true,
+    };
+    assert_eq!(
+        arrows(&state),
+        vec![favorites_right.clone(), inputs_right.clone()]
+    );
+    // The arrow wins over the cut-off card beneath it.
+    let rect = controls(&state)
+        .into_iter()
+        .find(|c| c.target == favorites_right)
+        .unwrap()
+        .rect;
+    let (x, y) = rect.center();
+    assert_eq!(
+        state.hit_test(&controls(&state), x, y),
+        Some(favorites_right.clone())
+    );
+    state.pointer_focus(favorites_right.clone());
+    assert!(state.activate().is_empty());
+    assert!((state.home_scroll - 5. * HOME_TILE_PITCH).abs() < 0.01);
+    state.pointer_focus(inputs_right.clone());
+    state.activate();
+    assert!(state.input_scroll > 0. && state.input_scroll <= 3. * INPUT_PITCH);
+    assert!(!state.strip_can_scroll(true, true));
+    assert!(arrows(&state).contains(&Target::StripArrow {
+        inputs: true,
+        forward: false
+    }));
+    assert!(!arrows(&state).contains(&inputs_right));
+    // A remote key moves to real content, never to an arrow.
+    state.direction(Direction::Right, &controls(&state));
+    assert!(!matches!(state.focus, Target::StripArrow { .. }));
+    for _ in 0..20 {
+        state.direction(Direction::Right, &controls(&state));
+        state.direction(Direction::Down, &controls(&state));
+        assert!(!matches!(state.focus, Target::StripArrow { .. }));
+    }
 }

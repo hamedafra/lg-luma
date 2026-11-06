@@ -1109,6 +1109,9 @@ fn brand_mark(out: &mut Scene, assets: &Assets, app: &App, rect: Rect, language:
     }
 }
 
+/// How far the Home favourites and inputs rows sit below upstream's layout.
+pub const HOME_ROWS_DROP: f32 = 64.;
+
 fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
     let language = state.preferences.language;
     let s = state.scroll;
@@ -1161,6 +1164,8 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
             top + date_height + greeting_height,
         );
     }
+    // Favourites and inputs sit one step lower than upstream, closer to LG's launcher bar.
+    let s = s - HOME_ROWS_DROP;
     out.text(
         language.t("favorites"),
         Rect::new(84., 478.5 - s, 1000., 31.),
@@ -1262,6 +1267,9 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
     }
     out.draw.push(Draw::EdgeFadeX(None));
     out.draw.push(Draw::Clip(Some(state.content_viewport())));
+    if !apps.is_empty() {
+        strip_arrows(out, state, assets, false, 544.8 - s + FACE_HEIGHT / 2.);
+    }
     let input_y = 544.8 + grid_height + 41.6 - s;
     let inputs = state.home_inputs();
     if !inputs.is_empty() {
@@ -1363,6 +1371,57 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
     }
     out.draw.push(Draw::EdgeFadeX(None));
     out.draw.push(Draw::Clip(Some(state.content_viewport())));
+    if !inputs.is_empty() {
+        strip_arrows(out, state, assets, true, input_y + 58.4 + 52.);
+    }
+}
+
+/// Round page buttons in the margins beside a Home strip while the pointer is in use: the
+/// Magic Remote and air mice can then page through it like LG's launcher bar, wheel or not.
+fn strip_arrows(out: &mut Scene, state: &State, assets: &Assets, inputs: bool, center_y: f32) {
+    if !state.pointer || state.moving.is_some() || state.overlay.is_some() {
+        return;
+    }
+    const SIZE: f32 = 60.;
+    // The buttons sit in the side margins, outside the content clip.
+    let content = state.content_viewport();
+    out.draw
+        .push(Draw::Clip(Some(Rect::new(0., content.y, 1920., content.h))));
+    for (forward, center_x) in [(false, 42.), (true, 1866.)] {
+        if !state.strip_can_scroll(inputs, forward) {
+            continue;
+        }
+        let target = Target::StripArrow { inputs, forward };
+        let rect = Rect::new(center_x - SIZE / 2., center_y - SIZE / 2., SIZE, SIZE);
+        let focused = state.focus == target;
+        out.shadow(rect, SIZE / 2., 18., 6., 0.35);
+        out.shape(
+            rect,
+            SIZE / 2.,
+            if focused {
+                c(0xf3f3f3, 0.96)
+            } else {
+                c(0x16191d, 0.82)
+            },
+        );
+        out.border(rect, SIZE / 2., 1., c(0xffffff, 0.14));
+        out.icon(
+            assets,
+            if forward {
+                "chevron-right"
+            } else {
+                "chevron-left"
+            },
+            rect.inset(15.),
+            if focused {
+                c(0x1b1d21, 1.)
+            } else {
+                c(0xf3f3f3, 1.)
+            },
+        );
+        out.control(target, rect, false);
+    }
+    out.draw.push(Draw::Clip(Some(content)));
 }
 
 struct WeatherSummary {
@@ -2669,6 +2728,17 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                     "type",
                     Some(language.t(state.preferences.text_rendering.label_key())),
                     true,
+                ),
+                (
+                    9,
+                    language.t("fontHinting"),
+                    "type",
+                    Some(language.t(if state.preferences.text_hinting {
+                        "stateOn"
+                    } else {
+                        "stateOff"
+                    })),
+                    false,
                 ),
                 (5, language.t("quitApp"), "power", None, false),
             ]

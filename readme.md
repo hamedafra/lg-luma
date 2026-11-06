@@ -255,7 +255,16 @@ arrived. LG's launch splash keeps the last packaged background, as with uploads.
 
 Home shows TV inputs in one row like LG's own launcher bar: four inputs in full, the fifth cut
 off at the edge, and the rest reached with **Left / Right**, the scroll wheel or a sideways swipe.
-Favorites scroll the same way.
+Favorites scroll the same way. While the Magic Remote or an air mouse pointer is in use, round
+arrow buttons appear at the ends of a row that continues; select one to page through it, wheel or
+not.
+
+### Sharper text
+
+The TV draws every app's interface at 1920×1080 and scales it up to the 4K panel, so soft text
+edges become visible. Luma grid-fits glyph outlines to the pixel grid (**Settings → System → Font
+hinting**, on by default) and uses smooth analytic edge coverage by default (**Text rendering →
+Analytic**); 4× MSAA remains available.
 
 ### Navigation sounds
 
