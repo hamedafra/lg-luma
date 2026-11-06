@@ -3269,3 +3269,61 @@ fn update_card_shows_progress_restores_retry_and_ignores_presses_while_busy() {
     state.install_response(Response::Finished(Ok(())));
     assert_eq!(state.update_status, Status::Unchecked);
 }
+
+#[test]
+fn home_inputs_form_one_sideways_strip_of_four_like_the_favorites() {
+    use crate::state::{Direction, HOME_STRIP_RIGHT, INPUT_PITCH};
+    let mut state = ready();
+    state.inventory.inputs = (1..=7)
+        .map(|n| crate::model::Input {
+            id: format!("HDMI_{n}"),
+            title: format!("HDMI {n}"),
+            port: format!("HDMI {n}"),
+            connected: Some(true),
+            signal: None,
+        })
+        .collect();
+    let rects = |state: &State| -> Vec<crate::state::Rect> {
+        controls(state)
+            .into_iter()
+            .filter(|c| matches!(c.target, Target::Input(_)))
+            .map(|c| c.rect)
+            .collect()
+    };
+    let cards = rects(&state);
+    assert_eq!(cards.len(), 7);
+    // One row; four whole cards end exactly where the sixth favourite ends.
+    assert!(cards.iter().all(|r| (r.y - cards[0].y).abs() < 0.01));
+    assert!((cards[3].x + cards[3].w - HOME_STRIP_RIGHT).abs() < 0.01);
+    assert!(cards[4].x + cards[4].w > HOME_STRIP_RIGHT);
+
+    // Down from the favourites lands on a whole input, never the cut-off fifth.
+    state.focus = state.first_content();
+    state.direction(Direction::Down, &controls(&state));
+    assert!(matches!(&state.focus, Target::Input(_)));
+    state.focus = Target::Input("HDMI_4".into());
+    state.direction(Direction::Right, &controls(&state));
+    assert_eq!(state.focus, Target::Input("HDMI_5".into()));
+    assert!((state.input_scroll - INPUT_PITCH).abs() < 0.01);
+    assert_eq!(state.home_scroll, 0.);
+    for _ in 0..5 {
+        state.direction(Direction::Right, &controls(&state));
+    }
+    assert_eq!(state.focus, Target::Input("HDMI_7".into()));
+    assert!((state.input_scroll - 3. * INPUT_PITCH).abs() < 0.01);
+    let focused = rects(&state)[6];
+    assert!(focused.x + focused.w <= HOME_STRIP_RIGHT + 0.01);
+    state.direction(Direction::Up, &controls(&state));
+    assert!(matches!(&state.focus, Target::App(_)));
+
+    // The wheel over the strip scrolls it sideways, not the page or the favourites.
+    let y = rects(&state)[0].center().1;
+    assert!(state.wheel_scroll(&controls(&state), Some((1000., y)), 0, 1));
+    assert!((state.input_scroll - 2. * INPUT_PITCH).abs() < 0.01);
+    assert_eq!(state.scroll, 0.);
+    assert_eq!(state.home_scroll, 0.);
+    // Fewer inputs clamp the offset back.
+    state.inventory.inputs.truncate(2);
+    state.reconcile_focus();
+    assert_eq!(state.input_scroll, 0.);
+}

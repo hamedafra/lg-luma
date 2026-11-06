@@ -371,7 +371,12 @@ impl Platform {
     }
 
     pub fn sync_splash(&self, background: &str) {
-        if self.webos && self.splash_enabled && !crate::wallpapers::valid_id(background) {
+        // LG's splash takes packaged images only; uploads and Bing keep the last packaged one.
+        if self.webos
+            && self.splash_enabled
+            && !crate::wallpapers::valid_id(background)
+            && background != crate::bing::ID
+        {
             self.send(Request::SyncSplash(background.to_owned()));
         }
     }

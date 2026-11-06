@@ -173,7 +173,7 @@ fn small_file(path: &Path, maximum: u64) -> Option<Vec<u8>> {
     (bytes.len() as u64 <= maximum).then_some(bytes)
 }
 
-fn catalog(directory: &Path) -> Vec<Wallpaper> {
+pub(crate) fn catalog(directory: &Path) -> Vec<Wallpaper> {
     if !real_directory(directory) {
         return vec![];
     }
@@ -231,7 +231,7 @@ fn delete_wallpaper(directory: &Path, id: &str, selected: &str) -> Result<(), St
 }
 
 /// Root Home creates files readable by the same app user after takeover is disabled.
-fn create_directory(path: &Path) -> Result<(), String> {
+pub(crate) fn create_directory(path: &Path) -> Result<(), String> {
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {
@@ -273,7 +273,7 @@ fn inherit_owner(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -329,7 +329,7 @@ fn decode(bytes: &[u8]) -> Result<image::RgbImage, String> {
     }))
 }
 
-fn shade(image: &mut image::RgbImage) {
+pub(crate) fn shade(image: &mut image::RgbImage) {
     // Same base, image opacity and gradients as tools/assets.mjs. Only source-specific
     // saturation adjustments are omitted for owner-supplied photographs.
     let stops = [
@@ -340,12 +340,15 @@ fn shade(image: &mut image::RgbImage) {
         (0.85, [23., 25., 29.], 0.92157),
         (1., [23., 25., 29.], 0.96078),
     ];
+    // Proportional, so 4K variants match the 1080p layout.
+    let bottom = image.height().saturating_sub(1).max(1) as f32;
+    let right = image.width().saturating_sub(1).max(1) as f32;
     for (x, y, pixel) in image.enumerate_pixels_mut() {
-        let y = y as f32 / 1079.;
+        let y = y as f32 / bottom;
         let pair = stops.windows(2).find(|s| y <= s[1].0).unwrap();
         let t = (y - pair[0].0) / (pair[1].0 - pair[0].0);
         let alpha = pair[0].2 * (1. - t) + pair[1].2 * t;
-        let horizontal = 0.42 * (1. - x as f32 / (1919. * 0.75)).max(0.);
+        let horizontal = 0.42 * (1. - x as f32 / (right * 0.75)).max(0.);
         for i in 0..3 {
             let base = pixel[i] as f32 * 0.92 + [23., 25., 28.][i] * 0.08;
             let base = base * (1. - horizontal) + [17., 20., 23.][i] * horizontal;
@@ -356,7 +359,7 @@ fn shade(image: &mut image::RgbImage) {
     }
 }
 
-fn jpeg(image: &image::RgbImage, quality: u8) -> Result<Vec<u8>, String> {
+pub(crate) fn jpeg(image: &image::RgbImage, quality: u8) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, quality)
         .encode_image(image)

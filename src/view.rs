@@ -5,8 +5,8 @@ use crate::{
     renderer::{Color, Draw, TextStyle, WHITE},
     state::{
         APPS_COLUMNS, Control, HOME_FADE_LEFT, HOME_FADE_RIGHT, HOME_STRIP_LEFT, HOME_STRIP_RIGHT,
-        HOME_TILE_PITCH, HOME_TILE_WIDTH, KEYS, Overlay, Page, Rect, SYSTEM_SECTION, State,
-        Subpage, Target, TextField, WIDGETS_SECTION,
+        HOME_TILE_PITCH, HOME_TILE_WIDTH, INPUT_CARD_WIDTH, INPUT_PITCH, KEYS, Overlay, Page, Rect,
+        SYSTEM_SECTION, State, Subpage, Target, TextField, WIDGETS_SECTION,
     },
     weather::{self, Unit},
 };
@@ -52,7 +52,7 @@ impl Assets {
     }
 
     fn background(&self, state: &State, id: &str) -> String {
-        if let Some(item) = state.wallpapers.iter().find(|item| item.id == id) {
+        if let Some(item) = state.custom_wallpaper(id) {
             return if state.preferences.wallpaper_gradient {
                 item.image()
             } else {
@@ -472,6 +472,25 @@ fn c(rgb: u32, alpha: f32) -> Color {
         alpha,
     ]
 }
+/// Packaged thumbnail for an ID; Bing shows a dark placeholder until its first download.
+fn background_thumbnail_id(id: &str) -> &str {
+    if id == crate::bing::ID {
+        "midnight"
+    } else {
+        id
+    }
+}
+
+/// Marks the daily image's card, whatever Bing's photo shows that day.
+fn bing_badge(out: &mut Scene, assets: &Assets, card: Rect) {
+    let label = "Bing";
+    let style = text(17.6, 650, -0.01);
+    let width = (assets.width(label, style) + 28.).ceil();
+    let pill = Rect::new(card.x + 12., card.y + 12., width, 30.);
+    out.shape(pill, 15., c(0x111316, 0.72));
+    out.text(label, pill, style, c(0xf3f3f3, 1.), true);
+}
+
 fn text(size: f32, weight: u16, tracking: f32) -> TextStyle {
     TextStyle::new(size).weight(weight).tracking(tracking)
 }
@@ -1244,12 +1263,7 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
     out.draw.push(Draw::EdgeFadeX(None));
     out.draw.push(Draw::Clip(Some(state.content_viewport())));
     let input_y = 544.8 + grid_height + 41.6 - s;
-    let inputs: Vec<_> = state
-        .inventory
-        .inputs
-        .iter()
-        .filter(|input| state.preferences.input_visible(input))
-        .collect();
+    let inputs = state.home_inputs();
     if !inputs.is_empty() {
         out.text(
             language.t("inputsHeading"),
@@ -1259,11 +1273,24 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
             false,
         );
     }
+    // One sideways strip, like the favourites and LG's own launcher bar.
+    out.draw.push(Draw::Clip(Some(state.inputs_viewport())));
+    let left = if state.input_scroll > 0. {
+        [HOME_FADE_LEFT, HOME_STRIP_LEFT]
+    } else {
+        [0., 0.]
+    };
+    out.draw.push(Draw::EdgeFadeX(Some([
+        left[0],
+        left[1],
+        HOME_STRIP_RIGHT,
+        HOME_FADE_RIGHT,
+    ])));
     for (index, input) in inputs.iter().enumerate() {
         let rect = Rect::new(
-            84. + (index % 3) as f32 * 591.45,
-            input_y + 58.4 + (index / 3) as f32 * 126.4,
-            569.1,
+            84. + index as f32 * INPUT_PITCH - state.input_scroll,
+            input_y + 58.4,
+            INPUT_CARD_WIDTH,
             104.,
         );
         let focused = state.focus == Target::Input(input.id.clone());
@@ -1317,14 +1344,14 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
         );
         out.text(
             state.preferences.input_title(input),
-            Rect::new(rect.x + 93., rect.y + 24.3, 450., 28.8),
+            Rect::new(rect.x + 93., rect.y + 24.3, rect.w - 114., 28.8),
             text(24., 500, -0.03),
             WHITE,
             false,
         );
         out.text(
             input_status(input, name.is_some(), language),
-            Rect::new(rect.x + 93., rect.y + 57.4, 450., 25.2),
+            Rect::new(rect.x + 93., rect.y + 57.4, rect.w - 114., 25.2),
             text(16.8, 400, 0.).leading(1.5),
             c(0xe8e8e8, 0.48),
             false,
@@ -1334,6 +1361,8 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
         }
         out.control(Target::Input(input.id.clone()), rect, true);
     }
+    out.draw.push(Draw::EdgeFadeX(None));
+    out.draw.push(Draw::Clip(Some(state.content_viewport())));
 }
 
 struct WeatherSummary {
@@ -2371,6 +2400,21 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                     }),
                     false,
                 ),
+                (
+                    8,
+                    "navigationSounds",
+                    if state.preferences.ui_sounds {
+                        "volume"
+                    } else {
+                        "volume-off"
+                    },
+                    Some(if state.preferences.ui_sounds {
+                        language.t("stateOn")
+                    } else {
+                        language.t("stateOff")
+                    }),
+                    false,
+                ),
             ]
             .into_iter()
             .enumerate()
@@ -2485,7 +2529,7 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
             let actions = out.draw.split_off(actions_start);
             for index in 0..state.background_count() {
                 let id = state.background_id(index).unwrap();
-                let custom = state.wallpapers.iter().find(|item| item.id == id);
+                let custom = state.custom_wallpaper(id);
                 let rect = Rect::new(
                     640. + (index % 3) as f32 * 380.,
                     252.8 + (index / 3) as f32 * 226.5 - s,
@@ -2495,7 +2539,7 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                 out.shadow(rect, 16., 15., 3., 0.13);
                 out.image(
                     custom.map_or_else(
-                        || assets.path(format!("thumbnails/{id}.jpg")),
+                        || assets.path(format!("thumbnails/{}.jpg", background_thumbnail_id(id))),
                         |item| item.thumbnail(),
                     ),
                     rect,
@@ -2503,6 +2547,9 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                     false,
                 );
                 out.border(rect, 16., 1., c(0xffffff, 0.086));
+                if id == crate::bing::ID {
+                    bing_badge(out, assets, rect);
+                }
                 if state.preferences.background == id {
                     out.border(rect.inset(-2.), 18., 2., c(0xdedede, 1.));
                     out.border(rect.inset(-7.), 23., 3., c(0xdedede, 0.10));
@@ -3189,16 +3236,15 @@ fn options(out: &mut Scene, state: &State, assets: &Assets, id: &str, anchor: Op
     let panel = Rect::new(x, card.y.clamp(164., 974. - height), 520., height);
     // Lift the selected card out of the dimmed grid without moving its hit region.
     if background {
-        let path = state
-            .wallpapers
-            .iter()
-            .find(|item| item.id == id)
-            .map_or_else(
-                || assets.path(format!("thumbnails/{id}.jpg")),
-                |item| item.thumbnail(),
-            );
+        let path = state.custom_wallpaper(id).map_or_else(
+            || assets.path(format!("thumbnails/{}.jpg", background_thumbnail_id(id))),
+            |item| item.thumbnail(),
+        );
         out.image(path, card, 16., false);
         out.border(card, 16., 1., c(0xffffff, 0.086));
+        if id == crate::bing::ID {
+            bing_badge(out, assets, card);
+        }
     } else if let Some(app) = app.filter(|_| !shortcut) {
         let favorite_color = app_face(out, assets, app, card, language, 19.2);
         if favorite {

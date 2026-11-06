@@ -536,7 +536,8 @@ fn custom_gallery_navigation_reveals_whole_cards_in_incomplete_rows() {
     let mut state = ready();
     state.open(2);
     state.section = 1;
-    state.set_wallpapers(vec![custom(1), custom(2)]);
+    // Nine bundled cards, one upload and the Bing card: the last row holds two.
+    state.set_wallpapers(vec![custom(1)]);
     state.focus = Target::Background(8);
     state.direction(Direction::Right, &controls(&state));
     assert_eq!(state.focus, Target::Background(9));
@@ -719,13 +720,17 @@ fn every_unselected_bundled_background_can_be_removed_and_stays_removed_after_re
         assert!(!(0..state.background_count()).any(|i| state.background_id(i) == Some(id)));
         assert!(controls(&state).iter().any(|c| c.target == state.focus));
     }
-    assert_eq!(state.background_count(), 1);
+    // The Bing card replaces itself daily and cannot be removed.
+    assert_eq!(state.background_count(), 2);
+    assert_eq!(state.background_id(1), Some(crate::bing::ID));
+    assert!(!state.can_delete_background(crate::bing::ID));
     let mut preferences: crate::model::Preferences =
         serde_json::from_slice(&serde_json::to_vec(&state.preferences).unwrap()).unwrap();
     preferences.sanitize();
     let restored = State::new(preferences);
-    assert_eq!(restored.background_count(), 1);
+    assert_eq!(restored.background_count(), 2);
     assert_eq!(restored.background_id(0), Some("dunes"));
+    assert_eq!(restored.background_id(1), Some(crate::bing::ID));
 }
 
 #[test]
@@ -826,4 +831,38 @@ fn removed_popup_entry_closes_safely_and_preference_sanitizing_protects_the_sele
             .any(|id| id == "dunes" || id == "../bad")
     );
     assert!(state.preferences.deleted_backgrounds.len() <= 1);
+}
+
+#[test]
+fn bing_card_is_selectable_before_its_first_download_and_rotates_only_once_downloaded() {
+    let mut state = ready();
+    state.open(2);
+    state.section = 1;
+    let index = BACKGROUNDS.len();
+    assert_eq!(state.background_id(index), Some(crate::bing::ID));
+    state.focus = Target::Background(index);
+    assert!(state.activate().is_empty());
+    assert_eq!(state.activate(), vec![Effect::Save]);
+    assert_eq!(state.preferences.background, crate::bing::ID);
+    // LG's splash keeps the last packaged background.
+    assert_ne!(state.preferences.splash_background(), crate::bing::ID);
+    let mut preferences = state.preferences.clone();
+    preferences.sanitize();
+    assert_eq!(preferences.background, crate::bing::ID);
+
+    state.preferences.background = BACKGROUNDS[BACKGROUNDS.len() - 1].0.into();
+    assert!(state.cycle_wallpaper(100));
+    assert_ne!(state.preferences.background, crate::bing::ID);
+    state.preferences.background = BACKGROUNDS[BACKGROUNDS.len() - 1].0.into();
+    let mut item = custom(1);
+    item.id = crate::bing::ID.into();
+    state.set_bing(item.clone(), crate::bing::Metadata::default());
+    assert!(state.cycle_wallpaper(200));
+    assert_eq!(state.preferences.background, crate::bing::ID);
+    assert_eq!(
+        state
+            .custom_wallpaper(crate::bing::ID)
+            .map(|i| i.thumbnail()),
+        Some(item.thumbnail())
+    );
 }

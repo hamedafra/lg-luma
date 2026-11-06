@@ -965,9 +965,10 @@ impl Renderer {
         let path = if self.stats.viewport.scale > 1.
             && self.info.max_texture_size >= 3840
             && Path::new(path)
-                .parent()
-                .and_then(Path::file_name)
-                .is_some_and(|p| p == "wallpapers")
+                .ancestors()
+                .skip(1)
+                .take(2)
+                .any(|p| p.file_name().is_some_and(|p| p == "wallpapers"))
         {
             self.artwork_variants
                 .entry(path.into())

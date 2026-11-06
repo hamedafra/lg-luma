@@ -3793,5 +3793,20 @@
     "vi": "Phiên chỉnh sửa đã kết thúc",
     "nl": "Bewerksessie beëindigd",
     "sv": "Redigeringssessionen har avslutats"
+  },
+  "navigationSounds": {
+    "zh-tw": "導覽音效",
+    "en": "Navigation sounds",
+    "de": "Navigationstöne",
+    "es": "Sonidos de navegación",
+    "zh": "导航音效",
+    "pt": "Sons de navegação",
+    "it": "Suoni di navigazione",
+    "ru": "Звуки навигации",
+    "pl": "Dźwięki nawigacji",
+    "fr": "Sons de navigation",
+    "vi": "Âm thanh điều hướng",
+    "nl": "Navigatiegeluiden",
+    "sv": "Navigeringsljud"
   }
 }

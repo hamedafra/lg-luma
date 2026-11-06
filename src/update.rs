@@ -2,7 +2,7 @@ pub mod discovery {
     use serde::{Deserialize, Serialize};
     use std::{io::Read, sync::mpsc, thread, time::Duration};
 
-    const FEED: &str = "https://github.com/ecklf/lg-luma/releases/latest/download/repo.json";
+    use super::FEED;
     const LIMIT: usize = 256 * 1024;
 
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -271,10 +271,16 @@ use std::{
     time::Instant,
 };
 
-pub const FEED: &str = "https://github.com/ecklf/lg-luma/releases/latest/download/repo.json";
+/// Updates come from this fork's releases, never upstream's: upstream builds lack its features.
+macro_rules! releases {
+    () => {
+        "https://github.com/hamedafra/lg-luma/releases/"
+    };
+}
+pub const FEED: &str = concat!(releases!(), "latest/download/repo.json");
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 /// Only IPKs from this project's own release assets are installed.
-const RELEASES: &str = "https://github.com/ecklf/lg-luma/releases/download/";
+const RELEASES: &str = concat!(releases!(), "download/");
 /// A fresh directory per attempt; never truncate a predictable path in shared /tmp.
 fn download_directory() -> Result<(String, PathBuf), String> {
     use ring::rand::SecureRandom;
@@ -585,8 +591,7 @@ mod tests {
         }}]})
     }
 
-    const URL: &str =
-        "https://github.com/ecklf/lg-luma/releases/download/v9.0.0/com.ecklf.luma_9.0.0_arm.ipk";
+    const URL: &str = "https://github.com/hamedafra/lg-luma/releases/download/v9.0.0/com.ecklf.luma_9.0.0_arm.ipk";
 
     #[test]
     fn attempt_paths_are_private_unique_and_results_are_terminal_only_when_finished() {
@@ -669,7 +674,14 @@ mod tests {
             ),
             feed(
                 "9.0.0",
-                "https://github.com/ecklf/lg-luma/releases/download/../x_arm.ipk",
+                "https://github.com/hamedafra/lg-luma/releases/download/../x_arm.ipk",
+                &sha,
+                1000,
+            ),
+            // Upstream builds lack this fork's features and must never replace it.
+            feed(
+                "9.0.0",
+                "https://github.com/ecklf/lg-luma/releases/download/v9.0.0/com.ecklf.luma_9.0.0_arm.ipk",
                 &sha,
                 1000,
             ),

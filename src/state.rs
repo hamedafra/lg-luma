@@ -23,10 +23,19 @@ pub const HOME_STRIP_LEFT: f32 = 84.;
 pub const HOME_STRIP_RIGHT: f32 = 1748.;
 pub const HOME_TILE_WIDTH: f32 = 256.;
 pub const HOME_TILE_PITCH: f32 = 281.6;
+/// Like LG's own launcher bar: four inputs in full, the fifth cut off at the strip's end
+/// (where the sixth favourite ends), the rest reached by scrolling sideways.
+pub const INPUT_CARD_WIDTH: f32 = 399.2;
+pub const INPUT_PITCH: f32 = 421.6;
 pub const HOME_FADE_LEFT: f32 = 8.;
 pub const HOME_FADE_RIGHT: f32 = 1910.;
 pub const BACKGROUND_FADE: f32 = 0.4;
 pub const CYCLE_FADE: f32 = 1.6;
+
+/// Whether a Home strip card is fully visible, so the remote may move to it directly.
+fn in_strip(rect: Rect) -> bool {
+    rect.x >= HOME_STRIP_LEFT - 0.1 && rect.x + rect.w <= HOME_STRIP_RIGHT + 0.1
+}
 
 pub fn unix_now() -> u64 {
     std::time::SystemTime::now()
@@ -217,6 +226,8 @@ pub struct State {
     pub subpage: Option<Subpage>,
     pub scroll: f32,
     pub home_scroll: f32,
+    /// Sideways offset of the Home inputs strip.
+    pub input_scroll: f32,
     pub overlay: Option<Overlay>,
     pub moving: Option<String>,
     pub loading: bool,
@@ -237,6 +248,8 @@ pub struct State {
     pub previous_background: Option<(String, Instant)>,
     pub background_fade: f32,
     pub wallpapers: Vec<crate::wallpapers::Wallpaper>,
+    /// The latest downloaded Bing image of the day, shown as the `bing` background.
+    pub bing: Option<(crate::wallpapers::Wallpaper, crate::bing::Metadata)>,
     pub deleting_wallpaper: Option<String>,
     pub wallpaper_upload: Option<Result<crate::wallpapers::Session, String>>,
     pub tile_editor: Option<Result<crate::companion::Session, String>>,
@@ -263,6 +276,7 @@ impl State {
             subpage: None,
             scroll: 0.,
             home_scroll: 0.,
+            input_scroll: 0.,
             overlay: None,
             moving: None,
             loading: false,
@@ -281,6 +295,7 @@ impl State {
             previous_background: None,
             background_fade: BACKGROUND_FADE,
             wallpapers: vec![],
+            bing: None,
             deleting_wallpaper: None,
             wallpaper_upload: None,
             tile_editor: None,
@@ -526,13 +541,41 @@ impl State {
     }
 
     pub fn favorites_viewport(&self) -> Rect {
+        self.strip_viewport(self.home_scroll)
+    }
+
+    pub fn inputs_viewport(&self) -> Rect {
+        self.strip_viewport(self.input_scroll)
+    }
+
+    fn strip_viewport(&self, scroll: f32) -> Rect {
         let content = self.content_viewport();
-        let left = if self.home_scroll > 0. {
-            HOME_FADE_LEFT
-        } else {
-            0.
-        };
+        let left = if scroll > 0. { HOME_FADE_LEFT } else { 0. };
         Rect::new(left, content.y, HOME_FADE_RIGHT - left, content.h)
+    }
+
+    /// Inputs shown on Home, in strip order.
+    pub fn home_inputs(&self) -> Vec<&crate::model::Input> {
+        self.inventory
+            .inputs
+            .iter()
+            .filter(|input| self.preferences.input_visible(input))
+            .collect()
+    }
+
+    pub fn scroll_inputs(&mut self, delta: f32) {
+        let count = self.home_inputs().len();
+        let content = if count == 0 {
+            0.
+        } else {
+            (count - 1) as f32 * INPUT_PITCH + INPUT_CARD_WIDTH
+        };
+        let max = (content - (HOME_STRIP_RIGHT - HOME_STRIP_LEFT)).max(0.);
+        let next = (self.input_scroll + delta).clamp(0., max);
+        if next != self.input_scroll {
+            self.input_scroll = next;
+            self.dirty = true;
+        }
     }
 
     pub fn apps_viewport(&self) -> Rect {
@@ -550,16 +593,19 @@ impl State {
             .iter()
             .rev()
             .find(|control| {
-                let viewport =
-                    if self.page == Page::Home && matches!(control.target, Target::App(_)) {
-                        self.favorites_viewport()
-                    } else if matches!(control.target, Target::Background(_)) {
-                        self.backgrounds_viewport()
-                    } else if self.page == Page::Apps {
-                        self.apps_viewport()
-                    } else {
-                        self.content_viewport()
-                    };
+                let viewport = if self.page == Page::Home
+                    && matches!(control.target, Target::App(_))
+                {
+                    self.favorites_viewport()
+                } else if self.page == Page::Home && matches!(control.target, Target::Input(_)) {
+                    self.inputs_viewport()
+                } else if matches!(control.target, Target::Background(_)) {
+                    self.backgrounds_viewport()
+                } else if self.page == Page::Apps {
+                    self.apps_viewport()
+                } else {
+                    self.content_viewport()
+                };
                 control.rect.contains(x, y) && (!control.scrollable || viewport.contains(x, y))
             })
             .map(|control| control.target.clone())
@@ -586,8 +632,17 @@ impl State {
                         matches!(control.target, Target::App(_)) && control.rect.contains(x, y)
                     })
             });
-        let favorites = self.page == Page::Home && (x != 0 || over_favorites);
-        if favorites {
+        let over_inputs = self.page == Page::Home
+            && position.is_some_and(|(x, y)| {
+                self.inputs_viewport().contains(x, y)
+                    && controls.iter().any(|control| {
+                        matches!(control.target, Target::Input(_)) && control.rect.contains(x, y)
+                    })
+            });
+        let favorites = self.page == Page::Home && (x != 0 || over_favorites || over_inputs);
+        if over_inputs {
+            self.scroll_inputs((if x != 0 { x } else { -y }) as f32 * INPUT_PITCH);
+        } else if favorites {
             self.scroll_favorites((if x != 0 { x } else { -y }) as f32 * HOME_TILE_PITCH);
         } else {
             let bottom = self.scroll_bottom();
@@ -704,6 +759,7 @@ impl State {
     pub fn reconcile_focus(&mut self) {
         if self.page == Page::Home {
             self.scroll_favorites(0.);
+            self.scroll_inputs(0.);
         }
         if let Target::App(id) = &self.focus
             && !self.apps().iter().any(|app| &app.id == id)
@@ -760,12 +816,20 @@ impl State {
     pub fn reveal_focus(&mut self, controls: &[Control]) -> bool {
         let previous = self.scroll;
         let previous_home = self.home_scroll;
+        let previous_inputs = self.input_scroll;
         if let Some(control) = controls.iter().find(|c| c.target == self.focus) {
             if self.page == Page::Home && matches!(self.focus, Target::App(_)) {
                 if control.rect.x < HOME_STRIP_LEFT {
                     self.home_scroll += control.rect.x - HOME_STRIP_LEFT;
                 } else if control.rect.x + control.rect.w > HOME_STRIP_RIGHT {
                     self.home_scroll += control.rect.x + control.rect.w - HOME_STRIP_RIGHT;
+                }
+            }
+            if self.page == Page::Home && matches!(self.focus, Target::Input(_)) {
+                if control.rect.x < HOME_STRIP_LEFT {
+                    self.input_scroll += control.rect.x - HOME_STRIP_LEFT;
+                } else if control.rect.x + control.rect.w > HOME_STRIP_RIGHT {
+                    self.input_scroll += control.rect.x + control.rect.w - HOME_STRIP_RIGHT;
                 }
             }
             if matches!(
@@ -797,11 +861,15 @@ impl State {
         }
         if self.page == Page::Home {
             self.scroll_favorites(0.);
+            self.scroll_inputs(0.);
         }
-        if self.scroll != previous || self.home_scroll != previous_home {
+        let changed = self.scroll != previous
+            || self.home_scroll != previous_home
+            || self.input_scroll != previous_inputs;
+        if changed {
             self.dirty = true;
         }
-        self.scroll != previous || self.home_scroll != previous_home
+        changed
     }
 
     /// Hover and pointer-down must not move the control before pointer-up.
@@ -843,6 +911,8 @@ impl State {
         let ids: Vec<_> = self
             .background_ids()
             .filter(|id| self.deleting_wallpaper.as_deref() != Some(*id))
+            // Until its first download the daily card has no image to rotate to.
+            .filter(|id| *id != crate::bing::ID || self.bing.is_some())
             .map(str::to_owned)
             .collect();
         let next = crate::wallpaper_cycle::next(&ids, &self.preferences.background);
@@ -879,10 +949,31 @@ impl State {
                         .any(|deleted| deleted == id)
             })
             .chain(self.wallpapers.iter().map(|item| item.id.as_str()))
+            .chain(std::iter::once(crate::bing::ID))
     }
 
+    /// Image files of an uploaded or downloaded background; packaged ones have none.
+    pub fn custom_wallpaper(&self, id: &str) -> Option<&crate::wallpapers::Wallpaper> {
+        if id == crate::bing::ID {
+            return self.bing.as_ref().map(|(item, _)| item);
+        }
+        self.wallpapers.iter().find(|item| item.id == id)
+    }
+
+    pub fn set_bing(
+        &mut self,
+        wallpaper: crate::wallpapers::Wallpaper,
+        metadata: crate::bing::Metadata,
+    ) {
+        self.bing = Some((wallpaper, metadata));
+        self.dirty = true;
+    }
+
+    /// The daily image is always offered, never deleted: it replaces itself.
     pub fn can_delete_background(&self, id: &str) -> bool {
-        id != self.preferences.background && self.background_ids().any(|known| known == id)
+        id != self.preferences.background
+            && id != crate::bing::ID
+            && self.background_ids().any(|known| known == id)
     }
 
     fn background_target(&self, id: &str) -> Target {
@@ -1102,6 +1193,7 @@ impl State {
                                 .filter(|control| {
                                     matches!(control.target, Target::Input(_))
                                         && (control.rect.y - top).abs() < 1.
+                                        && in_strip(control.rect)
                                 })
                                 .min_by(|a, b| {
                                     (a.rect.center().0 - x)
@@ -1115,6 +1207,51 @@ impl State {
                         }
                     }
                     return vec![];
+                }
+            }
+            if self.page == Page::Home
+                && let Target::Input(id) = &self.focus
+            {
+                let inputs: Vec<String> = self
+                    .home_inputs()
+                    .iter()
+                    .map(|input| input.id.clone())
+                    .collect();
+                if let Some(index) = inputs.iter().position(|input| input == id) {
+                    match direction {
+                        Direction::Left | Direction::Right => {
+                            let next = if matches!(direction, Direction::Left) {
+                                index.saturating_sub(1)
+                            } else {
+                                (index + 1).min(inputs.len() - 1)
+                            };
+                            self.focus(Target::Input(inputs[next].clone()), controls);
+                            return vec![];
+                        }
+                        Direction::Up => {
+                            let x = controls
+                                .iter()
+                                .find(|control| control.target == self.focus)
+                                .map_or(960., |control| control.rect.center().0);
+                            let app = controls
+                                .iter()
+                                .filter(|control| {
+                                    matches!(control.target, Target::App(_))
+                                        && in_strip(control.rect)
+                                })
+                                .min_by(|a, b| {
+                                    (a.rect.center().0 - x)
+                                        .abs()
+                                        .total_cmp(&(b.rect.center().0 - x).abs())
+                                })
+                                .map(|control| control.target.clone());
+                            if let Some(app) = app {
+                                self.focus(app, controls);
+                                return vec![];
+                            }
+                        }
+                        Direction::Down => {}
+                    }
                 }
             }
             let setting_rows: Option<&[Target]> = match self.subpage {
@@ -1508,9 +1645,8 @@ impl State {
             .filter(|candidate| candidate.target != self.focus)
             .filter(|candidate| {
                 self.page != Page::Home
-                    || !matches!(candidate.target, Target::App(_))
-                    || (candidate.rect.x >= HOME_STRIP_LEFT - 0.1
-                        && candidate.rect.x + candidate.rect.w <= HOME_STRIP_RIGHT + 0.1)
+                    || !matches!(candidate.target, Target::App(_) | Target::Input(_))
+                    || in_strip(candidate.rect)
             })
             .filter_map(|candidate| {
                 // Header controls never steal an Up route from the active tab.
@@ -2186,6 +2322,7 @@ impl State {
                         return vec![];
                     }
                     2 => self.preferences.reduced_motion = !self.preferences.reduced_motion,
+                    8 => self.preferences.ui_sounds = !self.preferences.ui_sounds,
                     4 => {
                         self.subpage = Some(Subpage::Language);
                         self.focus = Target::Choice(self.preferences.language.index());
@@ -2235,11 +2372,13 @@ impl State {
                         Some((self.preferences.background.clone(), Instant::now()));
                     self.background_fade = BACKGROUND_FADE;
                 }
-                self.preferences.splash_background = Some(if crate::wallpapers::valid_id(&id) {
-                    self.preferences.splash_background().to_owned()
-                } else {
-                    id.clone()
-                });
+                self.preferences.splash_background = Some(
+                    if crate::wallpapers::valid_id(&id) || id == crate::bing::ID {
+                        self.preferences.splash_background().to_owned()
+                    } else {
+                        id.clone()
+                    },
+                );
                 self.preferences.background = id;
                 self.preferences.wallpaper_changed = unix_now();
                 self.back();

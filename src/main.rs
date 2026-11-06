@@ -1,4 +1,5 @@
 mod app_artwork;
+mod bing;
 // Used by the TV build's Home lifecycle; the host build compiles it for its tests.
 #[cfg(all(feature = "webos", target_os = "linux"))]
 #[cfg_attr(not(target_arch = "arm"), allow(dead_code))]
@@ -28,6 +29,7 @@ mod storage;
 mod text_rendering;
 #[path = "tile-editor.rs"]
 mod tile_editor;
+mod ui_sound;
 mod update;
 mod vector;
 mod view;
@@ -454,6 +456,26 @@ fn wallpaper_upload_active(state: &State, webos: bool, focused: bool, visible: b
     visible && (!webos || focused) && matches!(state.overlay, Some(Overlay::WallpaperUpload))
 }
 
+/// What a remote key can visibly change: a difference plays the navigation click.
+fn navigation_marker(state: &State) -> String {
+    format!(
+        "{:?}|{:?}|{:?}|{:?}|{}|{}",
+        state.focus,
+        state.page,
+        state.subpage,
+        state.overlay.as_ref().map(std::mem::discriminant),
+        state.recents_open(),
+        state.recents.selected,
+    )
+}
+
+/// Bing is fetched while it is the background, takes part in rotation or its card is on screen.
+fn bing_wanted(state: &State) -> bool {
+    state.preferences.background == bing::ID
+        || state.preferences.wallpaper_cycle
+        || (state.page == state::Page::Settings && state.section == 1)
+}
+
 fn input_refresh_active(state: &State, webos: bool, focused: bool, visible: bool) -> bool {
     webos
         && focused
@@ -682,6 +704,8 @@ fn run() -> Result<(), String> {
     let mut wallpaper_service =
         wallpapers::Service::new(&preferences_path, !webos && !options.script.is_empty())?;
     let mut tile_editor_service = tile_editor::Service::new(!webos && !options.script.is_empty())?;
+    let mut bing_service = bing::Service::new(&preferences_path, public_update_checks)?;
+    let mut bing_visible = true;
     if options.test_extra_apps > 0 {
         eprintln!(
             "Luma scroll preview: explicit {}-app expansion; preferences {}",
@@ -726,6 +750,12 @@ fn run() -> Result<(), String> {
             drivers.join(", ")
         ));
     }
+    // Desktop scripted captures stay silent; the TV and interactive previews click.
+    let mut ui_sound = options
+        .script
+        .is_empty()
+        .then(|| ui_sound::UiSound::new(&sdl))
+        .flatten();
     let video = sdl.video().map_err(|error| {
         format!(
             "SDL video initialization: {error}; drivers: {}; XDG_RUNTIME_DIR={:?}; WAYLAND_DISPLAY={:?}",
@@ -1006,6 +1036,14 @@ fn run() -> Result<(), String> {
                 _ => {}
             }
         }
+        bing_service.set_wanted(bing_wanted(&state));
+        if visible && !bing_visible {
+            bing_service.wake();
+        }
+        bing_visible = visible;
+        while let Ok(bing::Event::Ready(wallpaper, metadata)) = bing_service.receiver.try_recv() {
+            state.set_bing(wallpaper, metadata);
+        }
         tile_editor_service.set_active(
             focused && visible && matches!(state.overlay, Some(Overlay::TileEditor)),
             &state.preferences.custom_tiles,
@@ -1264,6 +1302,9 @@ fn run() -> Result<(), String> {
                 eprintln!("Luma window: {win_event:?}");
             }
             let mut pending = vec![];
+            let remote = matches!(event, Event::KeyDown { .. } | Event::KeyUp { .. });
+            let before = navigation_marker(&state);
+            let mut selected = false;
             match event {
                 Event::Quit { .. } => running = false,
                 Event::User { type_, code, .. } if Some(type_) == lifecycle_event => {
@@ -1456,6 +1497,7 @@ fn run() -> Result<(), String> {
                         && !held.held
                         && held.target == state.focus
                     {
+                        selected = true;
                         pending = state.activate();
                     }
                 }
@@ -1513,6 +1555,7 @@ fn run() -> Result<(), String> {
                             && hit(&scene.controls, &window, x, y, &state).as_ref()
                                 == Some(&held.target) =>
                     {
+                        selected = true;
                         pending = state.activate()
                     }
                     None if scene.modal.is_some_and(|rect| {
@@ -1553,6 +1596,16 @@ fn run() -> Result<(), String> {
                     }
                 }
                 _ => {}
+            }
+            if let Some(sound) = &mut ui_sound {
+                sound.set_active(running && focused && visible);
+                if state.preferences.ui_sounds {
+                    if selected {
+                        sound.play(ui_sound::Sound::Select);
+                    } else if remote && navigation_marker(&state) != before {
+                        sound.play(ui_sound::Sound::Move);
+                    }
+                }
             }
             running &= effects(
                 pending,

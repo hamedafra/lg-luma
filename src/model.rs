@@ -251,6 +251,8 @@ pub struct Preferences {
     pub wallpaper_gradient: bool,
     /// Unix seconds of the last automatic or chosen wallpaper change, for the timed modes.
     pub wallpaper_changed: u64,
+    /// Quiet clicks when the remote moves focus or selects.
+    pub ui_sounds: bool,
 }
 
 impl Default for Preferences {
@@ -281,6 +283,7 @@ impl Default for Preferences {
             wallpaper_cycle: false,
             wallpaper_gradient: true,
             wallpaper_changed: 0,
+            ui_sounds: true,
         }
     }
 }
@@ -383,6 +386,7 @@ impl Preferences {
         }
         if !BACKGROUNDS.iter().any(|(id, _)| *id == self.background)
             && !crate::wallpapers::valid_id(&self.background)
+            && self.background != crate::bing::ID
         {
             self.background = "dunes".into();
         }
