@@ -1,11 +1,5 @@
-//! Lazy TTF metrics and individual outlines; never preprocess an entire font.
-use geometry::lyon_tessellation::{
-    FillRule,
-    math::point,
-    path::{Path, path::Builder},
-};
-use luma_vector_geometry::{self as geometry, Vertex};
-use owned_ttf_parser::{AsFaceRef, GlyphId, OutlineBuilder, OwnedFace};
+//! Lazy TTF metrics and per-glyph coverage bitmaps; never preprocess an entire font.
+use owned_ttf_parser::{AsFaceRef, GlyphId, OwnedFace};
 use std::{cell::RefCell, collections::HashMap};
 
 /// Grid fitting for the TV's 1080p graphics plane, which the panel then scales up. Unhinted
@@ -100,34 +94,56 @@ impl Font {
         None
     }
 
-    /// Outline in em units, grid-fitted for `ppem` physical pixels when hinting is on. Falls
-    /// back to the unhinted outline if the hinter cannot handle the glyph.
-    pub fn geometry_at(
-        &self,
-        character: char,
-        ppem: f32,
-        hinting: Hinting,
-    ) -> Result<Vec<Vertex>, String> {
-        if hinting == Hinting::Off || !(4.0..=256.).contains(&ppem) {
-            return self.geometry(character);
-        }
-        match self.hinted(character, ppem, hinting) {
-            Some(path) => geometry::tessellate(&path, 0.15 / 256., FillRule::NonZero),
-            None => self.geometry(character),
-        }
-    }
-
-    fn hinted(&self, character: char, ppem: f32, hinting: Hinting) -> Option<Path> {
+    /// A coverage bitmap of `character` at `ppem` physical pixels, its outline shifted right by
+    /// `dx` pixels (subpixel positioning). Coverage is the exact area of each pixel inside the
+    /// outline, as FreeType's and Skia's grayscale rasterizers compute it.
+    pub fn rasterize(&self, character: char, ppem: f32, hinting: Hinting, dx: f32) -> Bitmap {
         use skrifa::{
             MetadataProvider,
             instance::{LocationRef, Size},
-            outline::{DrawSettings, Engine, HintingInstance, HintingOptions, SmoothMode},
+            outline::DrawSettings,
+        };
+        let empty = Bitmap::default();
+        let Ok(font) = skrifa::FontRef::new(self.face.as_slice()) else {
+            return empty;
+        };
+        let outlines = font.outline_glyphs();
+        let Some(glyph) = outlines.get(skrifa::GlyphId::new(u32::from(
+            self.lookup_glyph_index(character),
+        ))) else {
+            return empty;
+        };
+        let mut pen = PixelOutline::default();
+        let hinted = hinting != Hinting::Off
+            && (4.0..=256.).contains(&ppem)
+            && self.with_hinter(ppem, hinting, |instance| {
+                glyph
+                    .draw(DrawSettings::hinted(instance, false), &mut pen)
+                    .is_ok()
+            }) == Some(true);
+        if !hinted {
+            pen = PixelOutline::default();
+            let settings = DrawSettings::unhinted(Size::new(ppem), LocationRef::default());
+            if glyph.draw(settings, &mut pen).is_err() {
+                return empty;
+            }
+        }
+        pen.rasterize(dx)
+    }
+
+    fn with_hinter<T>(
+        &self,
+        ppem: f32,
+        hinting: Hinting,
+        draw: impl FnOnce(&skrifa::outline::HintingInstance) -> T,
+    ) -> Option<T> {
+        use skrifa::{
+            MetadataProvider,
+            instance::{LocationRef, Size},
+            outline::{Engine, HintingInstance, HintingOptions, SmoothMode},
         };
         let font = skrifa::FontRef::new(self.face.as_slice()).ok()?;
         let outlines = font.outline_glyphs();
-        let glyph = outlines.get(skrifa::GlyphId::new(u32::from(
-            self.lookup_glyph_index(character),
-        )))?;
         let key = ((ppem * 64.).round() as u32, hinting);
         let mut hinters = self.hinters.borrow_mut();
         let instance = hinters.entry(key).or_insert_with(|| {
@@ -136,7 +152,7 @@ impl Font {
             } else {
                 SmoothMode::Normal
             };
-            // The bundled fonts carry no bytecode; always use the automatic hinter.
+            // Neither Inter nor LG Smart UI carries bytecode; always use the automatic hinter.
             let options = HintingOptions {
                 engine: Engine::Auto(None),
                 target: mode.into(),
@@ -145,114 +161,109 @@ impl Font {
                 .map_err(|error| eprintln!("Luma font hinting at {ppem} px: {error}"))
                 .ok()
         });
-        let instance = instance.as_ref()?;
-        let mut pen = HintedOutline {
-            builder: Path::builder(),
-            scale: 1. / ppem,
-            open: false,
-        };
-        glyph
-            .draw(DrawSettings::hinted(instance, false), &mut pen)
-            .ok()?;
-        if pen.open {
-            pen.builder.end(true);
-        }
-        Some(pen.builder.build())
-    }
-
-    pub fn geometry(&self, character: char) -> Result<Vec<Vertex>, String> {
-        let face = self.face.as_face_ref();
-        let mut outline = GlyphOutline {
-            builder: Path::builder(),
-            scale: 1. / f32::from(face.units_per_em()),
-            open: false,
-        };
-        let glyph = GlyphId(self.lookup_glyph_index(character));
-        if face.outline_glyph(glyph, &mut outline).is_none() {
-            return Ok(Vec::new());
-        }
-        if outline.open {
-            outline.builder.end(true);
-        }
-        // Flatten at subpixel precision for glyphs up to 256 physical px/em,
-        // covering the current 1080p and 4K typography with the same geometry.
-        geometry::tessellate(&outline.builder.build(), 0.15 / 256., FillRule::NonZero)
+        Some(draw(instance.as_ref()?))
     }
 }
 
-/// Receives a hinted outline in pixels at the hinting size and stores it in em units.
-struct HintedOutline {
-    builder: Builder,
-    scale: f32,
-    open: bool,
+/// A glyph's coverage, one byte per pixel, placed relative to its pen position on the
+/// baseline: `left` pixels right and `top` pixels down (negative above the baseline).
+#[derive(Default)]
+pub struct Bitmap {
+    pub left: i32,
+    pub top: i32,
+    pub width: u32,
+    pub height: u32,
+    pub coverage: Vec<u8>,
 }
 
-impl skrifa::outline::OutlinePen for HintedOutline {
+enum Segment {
+    Move([f32; 2]),
+    Line([f32; 2]),
+    Quad([f32; 2], [f32; 2]),
+    Cubic([f32; 2], [f32; 2], [f32; 2]),
+}
+
+/// Collects an outline in physical pixels, y down, for the coverage rasterizer.
+#[derive(Default)]
+struct PixelOutline {
+    segments: Vec<Segment>,
+}
+
+impl PixelOutline {
+    fn rasterize(&self, dx: f32) -> Bitmap {
+        let points = self.segments.iter().flat_map(|segment| match segment {
+            Segment::Move(p) | Segment::Line(p) => vec![*p],
+            Segment::Quad(a, b) => vec![*a, *b],
+            Segment::Cubic(a, b, c) => vec![*a, *b, *c],
+        });
+        let (mut min, mut max) = ([f32::MAX; 2], [f32::MIN; 2]);
+        for [x, y] in points {
+            min = [min[0].min(x + dx), min[1].min(y)];
+            max = [max[0].max(x + dx), max[1].max(y)];
+        }
+        if min[0] >= max[0] || min[1] >= max[1] {
+            return Bitmap::default();
+        }
+        let (left, top) = (min[0].floor() as i32, min[1].floor() as i32);
+        let width = (max[0].ceil() as i32 - left).max(1) as u32;
+        let height = (max[1].ceil() as i32 - top).max(1) as u32;
+        let shift =
+            |[x, y]: [f32; 2]| ab_glyph_rasterizer::point(x + dx - left as f32, y - top as f32);
+        let mut raster = ab_glyph_rasterizer::Rasterizer::new(width as usize, height as usize);
+        let (mut start, mut last) = ([0.; 2], [0.; 2]);
+        let close = |raster: &mut ab_glyph_rasterizer::Rasterizer, last: [f32; 2], start| {
+            if last != start {
+                raster.draw_line(shift(last), shift(start));
+            }
+        };
+        for segment in &self.segments {
+            match *segment {
+                Segment::Move(p) => {
+                    close(&mut raster, last, start);
+                    (start, last) = (p, p);
+                }
+                Segment::Line(p) => {
+                    raster.draw_line(shift(last), shift(p));
+                    last = p;
+                }
+                Segment::Quad(c, p) => {
+                    raster.draw_quad(shift(last), shift(c), shift(p));
+                    last = p;
+                }
+                Segment::Cubic(c1, c2, p) => {
+                    raster.draw_cubic(shift(last), shift(c1), shift(c2), shift(p));
+                    last = p;
+                }
+            }
+        }
+        close(&mut raster, last, start);
+        let mut coverage = vec![0; width as usize * height as usize];
+        raster.for_each_pixel(|index, alpha| {
+            coverage[index] = (alpha.clamp(0., 1.) * 255. + 0.5) as u8;
+        });
+        Bitmap {
+            left,
+            top,
+            width,
+            height,
+            coverage,
+        }
+    }
+}
+
+impl skrifa::outline::OutlinePen for PixelOutline {
     fn move_to(&mut self, x: f32, y: f32) {
-        if self.open {
-            self.builder.end(true);
-        }
-        self.builder.begin(point(x * self.scale, -y * self.scale));
-        self.open = true;
+        self.segments.push(Segment::Move([x, -y]));
     }
     fn line_to(&mut self, x: f32, y: f32) {
-        self.builder.line_to(point(x * self.scale, -y * self.scale));
+        self.segments.push(Segment::Line([x, -y]));
     }
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        self.builder.quadratic_bezier_to(
-            point(x1 * self.scale, -y1 * self.scale),
-            point(x * self.scale, -y * self.scale),
-        );
+        self.segments.push(Segment::Quad([x1, -y1], [x, -y]));
     }
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        self.builder.cubic_bezier_to(
-            point(x1 * self.scale, -y1 * self.scale),
-            point(x2 * self.scale, -y2 * self.scale),
-            point(x * self.scale, -y * self.scale),
-        );
+        self.segments
+            .push(Segment::Cubic([x1, -y1], [x2, -y2], [x, -y]));
     }
-    fn close(&mut self) {
-        if self.open {
-            self.builder.end(true);
-            self.open = false;
-        }
-    }
-}
-
-struct GlyphOutline {
-    builder: Builder,
-    scale: f32,
-    open: bool,
-}
-
-impl OutlineBuilder for GlyphOutline {
-    fn move_to(&mut self, x: f32, y: f32) {
-        if self.open {
-            self.builder.end(true);
-        }
-        self.builder.begin(point(x * self.scale, -y * self.scale));
-        self.open = true;
-    }
-    fn line_to(&mut self, x: f32, y: f32) {
-        self.builder.line_to(point(x * self.scale, -y * self.scale));
-    }
-    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        self.builder.quadratic_bezier_to(
-            point(x1 * self.scale, -y1 * self.scale),
-            point(x * self.scale, -y * self.scale),
-        );
-    }
-    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        self.builder.cubic_bezier_to(
-            point(x1 * self.scale, -y1 * self.scale),
-            point(x2 * self.scale, -y2 * self.scale),
-            point(x * self.scale, -y * self.scale),
-        );
-    }
-    fn close(&mut self) {
-        if self.open {
-            self.builder.end(true);
-            self.open = false;
-        }
-    }
+    fn close(&mut self) {}
 }

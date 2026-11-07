@@ -1,4 +1,5 @@
-//! Persisted text rendering and startup-only GL configuration. MSAA needs a new SDL window.
+//! Persisted edge rendering and startup-only GL configuration. MSAA needs a new SDL window.
+//! Text itself is drawn from a coverage atlas either way; the mode decides vector logos.
 use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -43,28 +44,23 @@ pub struct Configuration {
     pub mode: TextRendering,
     #[serde(skip)]
     pub sample_counts: &'static [u8],
-    pub embolden: f32,
 }
 
 impl Configuration {
     /// Environment overrides retain their diagnostic role, ahead of the saved preference.
-    pub fn new(preference: TextRendering, msaa: Option<&str>, embolden: Option<&str>) -> Self {
+    pub fn new(preference: TextRendering, msaa: Option<&str>) -> Self {
         let mode = match msaa {
             Some("4") => TextRendering::Msaa,
             Some("0") => TextRendering::Analytic,
             _ => preference,
         };
-        let (sample_counts, default_embolden): (&'static [u8], f32) = match mode {
-            TextRendering::Msaa => (&[4, 2, 0], 0.),
-            TextRendering::Analytic => (&[0], 0.25),
+        let sample_counts: &'static [u8] = match mode {
+            TextRendering::Msaa => &[4, 2, 0],
+            TextRendering::Analytic => &[0],
         };
         Self {
             mode,
             sample_counts,
-            embolden: embolden
-                .and_then(|value| value.parse::<f32>().ok())
-                .filter(|strength| strength.is_finite())
-                .unwrap_or(default_embolden),
         }
     }
 }
@@ -74,28 +70,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn old_style_defaults_keep_no_emboldening_even_on_single_sample_fallbacks() {
+    fn analytic_is_the_default_and_msaa_falls_back_to_fewer_samples() {
         assert_eq!(TextRendering::default(), TextRendering::Analytic);
-        let config = Configuration::new(TextRendering::Msaa, None, None);
+        let config = Configuration::new(TextRendering::Msaa, None);
         assert_eq!(config.sample_counts, &[4, 2, 0]);
-        assert_eq!(config.embolden, 0.);
-        let analytic = Configuration::new(TextRendering::Analytic, None, None);
+        let analytic = Configuration::new(TextRendering::Analytic, None);
         assert_eq!(analytic.sample_counts, &[0]);
-        assert_eq!(analytic.embolden, 0.25);
     }
 
     #[test]
     fn environment_overrides_take_precedence_over_both_saved_modes() {
         for preference in TextRendering::ALL {
-            let msaa = Configuration::new(preference, Some("4"), None);
+            let msaa = Configuration::new(preference, Some("4"));
             assert_eq!(msaa.sample_counts, &[4, 2, 0]);
-            assert_eq!(msaa.embolden, 0.);
-            let analytic = Configuration::new(preference, Some("0"), Some("0.4"));
+            let analytic = Configuration::new(preference, Some("0"));
             assert_eq!(analytic.sample_counts, &[0]);
-            assert_eq!(analytic.embolden, 0.4);
         }
-        let invalid = Configuration::new(TextRendering::Analytic, Some("invalid"), Some("NaN"));
+        let invalid = Configuration::new(TextRendering::Analytic, Some("invalid"));
         assert_eq!(invalid.sample_counts, &[0]);
-        assert_eq!(invalid.embolden, 0.25);
     }
 }

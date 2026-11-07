@@ -45,7 +45,7 @@ try {
       'Visible vector text must remain valid across cache reuse',
     );
     assert.equal(render.last_presented.glyph_failures, 0);
-    assert.equal(render.capture.font_antialiasing, 'vector grayscale coverage');
+    assert.equal(render.capture.font_antialiasing, 'grayscale glyph atlas');
     assert.equal(render.capture.missing_glyphs, 0);
     assert.equal(render.capture.missing_images, 0);
     state.render = render;
@@ -413,12 +413,10 @@ try {
   assert.equal(msaaSaved.render.text_rendering.mode, 'analytic', 'Mode changes apply next launch');
   const msaa = await scenario('text-rendering-msaa', 'home,down');
   assert.equal(msaa.render.text_rendering.mode, 'msaa');
-  assert.equal(msaa.render.text_rendering.embolden, 0);
   const analyticSaved = await scenario('text-rendering-saved', `${textOptions},down,enter`);
   assert.equal(analyticSaved.preferences.text_rendering, 'analytic');
   const analytic = await scenario('text-rendering-analytic', 'home,down');
   assert.equal(analytic.render.text_rendering.mode, 'analytic');
-  assert.equal(analytic.render.text_rendering.embolden, 0.25);
   assert.equal(analytic.render.last_presented.multisample_samples, 0);
   // Companion HTTP writes are covered by loopback Rust tests. Seed its persisted result
   // here to render the TV's read-only detail/removal flow without a TV keyboard editor.

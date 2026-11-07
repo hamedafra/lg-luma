@@ -393,19 +393,23 @@ including the supplied PlayStation/Apple TV marks. `assets/logos/` holds origina
 the shared lyon tessellator to emit `.lvec` geometry. The format contains positions, edge offsets,
 vertex colors and coverage; holes, round strokes and the bundled gradients are preserved.
 Gradient colors are adaptively sampled at build time. The TV uploads each mesh lazily once and
-draws with a texture-free GLES2 shader. No SVG parser runs on the TV. The shared tessellator also
-handles font outlines. Installed app PNG/JPEG/WebP artwork, wallpaper photos, tile-background
+draws with a texture-free GLES2 shader. No SVG parser runs on the TV. Installed app PNG/JPEG/WebP artwork, wallpaper photos, tile-background
 images and the webOS installation icon remain raster assets. See [assets.md](assets.md) for licenses.
 
-This fork defaults to **Analytic**: on an LG C5 (webOS 25) a 4× MSAA capture showed only three
-intermediate coverage levels on text edges, which the panel's 2× upscale turns into visible
-steps. **Settings → System → Text rendering** offers **MSAA** (4× with 2×/single-sample
-fallbacks, no emboldening) and **Analytic (default)**.
+Text is drawn from glyph bitmaps, as LG's own Home does: on an LG C5 (webOS 25) the Home is
+Flutter 3.27 with Skia (`impeller:0`) on a 1920×1080 surface, rasterizing LG Smart UI with
+FreeType into a coverage atlas. Luma's earlier tessellated glyphs with an approximate edge
+fringe left small text about 2.5× as many soft edge pixels as FreeType; each glyph is now
+rasterized with exact area coverage (`ab_glyph_rasterizer`) at its physical size and one of four
+horizontal subpixel offsets, into 1024² RGBA atlas pages, and drawn as pixel-aligned quads by the
+paint shader. `LUMA_TEXT_GAMMA` (default 1, linear like FreeType) lifts partial coverage for
+experiments. **Settings → System → Text rendering** (**MSAA** or **Analytic (default)**) now
+only selects how vector logos and shapes are antialiased; on the C5 a 4× MSAA capture showed
+three intermediate edge levels, which the panel's 2× upscale turns into visible steps.
 
 **Font hinting** (Settings → System, on by default) grid-fits each glyph with skrifa's automatic
 hinter at its physical pixel size, vertically only (FreeType `LIGHT` equivalent, as Chrome and
-LG's Flutter Home do); glyph geometry and text runs are cached per size and density while it is
-on. Two-axis `NORMAL` hinting moves stems sideways without correcting advances, which leaves
+LG's Flutter Home do), before it is rasterized. Two-axis `NORMAL` hinting moves stems sideways without correcting advances, which leaves
 uneven letter gaps, so it is only available through `LUMA_HINTING=off|light|normal`, which
 overrides the saved choice for hardware comparisons. The `text_rendering` preference (`msaa` or
 `analytic`) is saved immediately and applies when Luma next starts because SDL selects MSAA when
@@ -417,17 +421,20 @@ loaded from the TV's `/usr/share/fonts` at runtime and never packaged (`src/syst
 four static faces stand in for Luma's weights (≤375 Light, ≤475 Regular, ≤675 SemiBold, else
 Bold; LG's Home sets most text in SemiBold). Layout measures with advances read from the same
 files, so the renderer and `Assets::width` agree; characters the face lacks fall back to the
-bundled CJK/Hangul fonts as before. When any face is missing Luma keeps Inter. For desktop
+bundled CJK/Hangul fonts as before. Inter's negative tracking is dropped with it (only added
+spacing applies), in both `Renderer::text` and `Assets::tracking`. When any face is missing Luma
+keeps Inter. For desktop
 previews, copy the four `LG_Smart_UI-{Light,Regular,SemiBold,Bold}.ttf` files from a TV and set
 `LUMA_SYSTEM_FONTS=<directory>`.
 
-Analytic mode uses a single-sample window and analytic text/logo edge filters. Text up to 16
-physical pixels is emboldened by 0.25 px per edge, fading out by 28 px. The choice is visual:
-analytic rendering was preferred on a contributor's webOS 5 TV, while MSAA was preferred in
-manual Mali-G52 TV comparisons. `LUMA_MSAA=4` or `0` overrides the saved mode and its default
-emboldening. `LUMA_EMBOLDEN` overrides the strength independently. Diagnostics report the
-startup `text_rendering` configuration, and `last_presented.multisample_samples` reports the
-actual window's samples. Offscreen captures can still be single-sample.
+Analytic mode uses a single-sample window and analytic logo edge filters. `LUMA_MSAA=4` or `0`
+overrides the saved mode. Diagnostics report the startup `text_rendering` configuration, and
+`last_presented.multisample_samples` reports the actual window's samples. Offscreen captures can
+still be single-sample.
+
+Text below 24 px moves 30 % of the way to 24 px (`view::readable`, applied by the `text()`
+style helper): LG's Home sets most text at 26–30 px on the same 1080p plane, and Luma's 15–17 px
+captions were hard to read after the panel's 2× scale-up.
 
 Shape edges use a one-drawable-pixel box filter centred on the edge, and rectangles (and logo
 placement) snap to whole drawable pixels. A straight edge is then a single step, and a one-pixel
@@ -494,21 +501,17 @@ navigation pointer. Both are original Luma vector artwork. The existing card cap
 names are visible. `Brand::artwork_size()` sets optical sizing per brand, keeping heavy wordmarks
 such as Hulu, Joyn and Plex closer to the visual weight of Apple TV, YouTube, Das Erste and ARTE.
 
-Text reads the bundled TTF's advances, kerning and line metrics lazily. Only needed glyph outlines
-are tessellated in font-em coordinates. Complete text runs are cached in static GPU buffers,
-independent of position/color/drawable density, avoiding a draw call per letter. CJK fonts open
-only when needed; there are no glyph bitmap atlases or full-font mesh exports.
+Text reads the font's advances, kerning and line metrics lazily. A text run's layout (each
+glyph's logical pen position) is cached independent of position, color and drawable density.
+When a run is drawn, each glyph's pen position becomes drawable pixels: the baseline snaps to a
+whole pixel and the x position to a quarter pixel, and the glyph for that character, font,
+physical size and quarter is rasterized once into the atlas. Glyph quads share the paint
+shader's batches, so a screen of text costs a few draw calls. CJK fonts open only when needed.
+There is no LCD subpixel rendering or complex-script shaping. MSAA mode requests 4× MSAA, with
+2×/single-sample fallbacks if EGL rejects a configuration; it does not affect text.
 
-MSAA mode requests 4× MSAA, with 2×/single-sample fallbacks if EGL rejects a configuration.
-Analytic mode requests a single-sample window. Multisampled text draws
-intact glyph fills without inward offsets/fringe triangles, which can cross on very thin
-small-text strokes. Single-sample targets use a narrower half-pixel boundary fringe. Glyph
-origins/baselines are pixel-aligned per drawable axis. There is no LCD subpixel rendering, font
-hinting or complex-script shaping. Inspect `multisample_samples` and `font_antialiasing`:
-offscreen captures can be single-sample while the actual window uses MSAA.
-
-Glyph geometry has an 8 MiB/4096-entry CPU cache target and text runs a 32 MiB/512-entry GPU
-target. Eviction preserves the current frame, which can temporarily exceed those targets.
+The atlas keeps up to four 4 MiB pages and starts over at the next frame beyond that; text run
+layouts have a 4 MiB/512-entry target. Eviction preserves the current frame.
 Raster artwork has a 48 MiB cache budget. Diagnostics include geometry bytes, triangles, draw
 calls and missing/failed artwork/glyphs. Idle screens draw on demand; VSync paces animation.
 

@@ -56,6 +56,16 @@ impl Assets {
         self.system_metrics = metrics.map(Box::new);
     }
 
+    /// Inter's tight display tracking cramps LG Smart UI, which is spaced for TV distance;
+    /// with it only added spacing applies. Keep in sync with `Renderer::text`.
+    fn tracking(&self, style: TextStyle) -> f32 {
+        if self.system_metrics.is_some() {
+            style.tracking.max(0.)
+        } else {
+            style.tracking
+        }
+    }
+
     fn advances(&self, style: TextStyle) -> Option<&BTreeMap<char, f32>> {
         if let Some(faces) = &self.system_metrics {
             return Some(&faces[crate::system_font::face(style.weight)]);
@@ -107,7 +117,7 @@ impl Assets {
                     .or_else(|| fallback.and_then(|a| a.get(&c)))
                     .copied()
                     .unwrap_or(if c == ' ' { 0.28 } else { 0.53 })
-                    + style.tracking)
+                    + self.tracking(style))
                     * style.size
             })
             .sum()
@@ -141,7 +151,7 @@ impl Assets {
                 .or_else(|| fallback.and_then(|a| a.get(&c)))
                 .copied()
                 .unwrap_or(if c == ' ' { 0.28 } else { 0.53 })
-                + style.tracking)
+                + self.tracking(style))
                 * style.size
         };
         let mut lines = 1;
@@ -502,7 +512,20 @@ fn bing_badge(out: &mut Scene, assets: &Assets, card: Rect) {
 }
 
 fn text(size: f32, weight: u16, tracking: f32) -> TextStyle {
-    TextStyle::new(size).weight(weight).tracking(tracking)
+    TextStyle::new(readable(size))
+        .weight(weight)
+        .tracking(tracking)
+}
+
+/// LG's own Home sets most text at 26–30 px on the same 1080p plane that the panel scales up
+/// 2×. Luma's smaller sizes move 30 % of the way to 24 px so captions and values stay legible;
+/// headings and larger text keep their designed size.
+pub(crate) fn readable(size: f32) -> f32 {
+    if size < 24. {
+        size + (24. - size) * 0.3
+    } else {
+        size
+    }
 }
 
 pub struct Navigation {
@@ -1371,7 +1394,7 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
             input_status(input, name.is_some(), language),
             Rect::new(rect.x + 93., rect.y + 57.4, rect.w - 114., 25.2),
             text(16.8, 400, 0.).leading(1.5),
-            c(0xe8e8e8, 0.48),
+            c(0xe8e8e8, 0.62),
             false,
         );
         if focused {
@@ -3729,9 +3752,17 @@ mod tests {
     }
 
     #[test]
+    fn small_text_grows_toward_lg_homes_sizes_and_large_text_keeps_its_size() {
+        assert!((readable(16.8) - 18.96).abs() < 0.001);
+        assert!((readable(20.8) - 21.76).abs() < 0.001);
+        assert_eq!(readable(24.), 24.);
+        assert_eq!(readable(90.4), 90.4);
+    }
+
+    #[test]
     fn layout_measures_with_lg_smart_ui_while_it_is_in_use() {
         let mut assets = assets();
-        let style = text(10., 500, 0.);
+        let style = TextStyle::new(10.).weight(500);
         assert_eq!(assets.width("W", style), 12.);
         let mut faces: crate::system_font::Metrics = Default::default();
         faces[crate::system_font::face(500)].insert('W', 0.5);

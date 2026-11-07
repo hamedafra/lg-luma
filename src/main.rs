@@ -804,12 +804,8 @@ fn run() -> Result<(), String> {
     let text_config = text_rendering::Configuration::new(
         state.preferences.text_rendering,
         std::env::var("LUMA_MSAA").ok().as_deref(),
-        std::env::var("LUMA_EMBOLDEN").ok().as_deref(),
     );
-    eprintln!(
-        "Luma text rendering: {:?}, embolden {} px",
-        text_config.mode, text_config.embolden
-    );
+    eprintln!("Luma edge rendering: {:?}", text_config.mode);
     for &samples in text_config.sample_counts {
         attributes.set_multisample_buffers(u8::from(samples > 0));
         attributes.set_multisample_samples(samples);
@@ -836,8 +832,7 @@ fn run() -> Result<(), String> {
     let hinting_override = std::env::var("LUMA_HINTING").ok();
     // Which typeface the renderer and layout use; None until the first frame decides.
     let mut system_font_applied: Option<bool> = None;
-    let mut renderer =
-        renderer::Renderer::new(&assets.root.join("font.ttf"), webos, text_config.embolden)?;
+    let mut renderer = renderer::Renderer::new(&assets.root.join("font.ttf"), webos)?;
     startup_stage("renderer");
     // Redraw only what changed since the back buffer's frame (LUMA_PARTIAL=0 draws in full).
     let partial = (std::env::var("LUMA_PARTIAL").as_deref() != Ok("0"))

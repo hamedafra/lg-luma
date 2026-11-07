@@ -919,7 +919,7 @@ fn system_version_is_inside_the_update_status_card_without_a_separate_row() {
     assert!(system.draw.iter().any(|draw| matches!(
         draw,
         crate::renderer::Draw::Text(label, _, style, color, _)
-            if label == "Current version: test" && style.size == 20.8 && style.weight == 450 && color[3] == 0.73
+            if label == "Current version: test" && style.size == view::readable(20.8) && style.weight == 450 && color[3] == 0.73
     )));
     assert_eq!(state.hit_test(&system.controls, 900., 200.), None);
     state.focus = Target::Sidebar(crate::state::SYSTEM_SECTION);
@@ -2767,7 +2767,7 @@ fn app_categories_and_search_use_matching_pills_and_larger_heavier_labels() {
         assert!(rendered.draw.iter().any(|draw| matches!(draw,
             Draw::Text(_, rect, style, ..) if rect.x >= control.rect.x && rect.x < control.rect.x + control.rect.w
                 && rect.y > control.rect.y && rect.y < control.rect.y + control.rect.h
-                && style.size == 20.8 && style.weight == 550
+                && style.size == view::readable(20.8) && style.weight == 550
         )));
     }
 }
@@ -2822,7 +2822,7 @@ fn clock_date_and_home_input_descriptions_use_larger_text() {
                 ),
                 24.,
             ),
-            (language.date(now), 18.4),
+            (language.date(now), view::readable(18.4)),
         ] {
             assert!(rendered.draw.iter().any(|draw| matches!(draw,
                 Draw::Text(text, rect, style, ..) if text == &label && style.size == size && rect.h >= size
@@ -2835,7 +2835,7 @@ fn clock_date_and_home_input_descriptions_use_larger_text() {
             language,
         );
         assert!(rendered.draw.iter().any(|draw| matches!(draw,
-            Draw::Text(text, rect, style, ..) if text == &description && style.size == 16.8 && rect.h == 25.2
+            Draw::Text(text, rect, style, ..) if text == &description && style.size == view::readable(16.8) && rect.h == 25.2
         )));
     }
 }
