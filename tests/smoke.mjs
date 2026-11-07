@@ -503,9 +503,11 @@ try {
     'favorites-edge-left',
     `home,down,${Array(6).fill('right').join(',')},click:40:664`,
   );
-  // With the pointer in use, the left margin (fragment included) is the row's back arrow.
-  assert.deepEqual(edgeLeft.focus, { StripArrow: { inputs: false, forward: false } });
-  assert.equal(edgeLeft.home_scroll, 0, 'The back arrow pages the row to its start');
+  assert.deepEqual(edgeLeft.focus, { App: edgeFavorites[0] });
+  assert.ok(
+    Math.abs(edgeLeft.home_scroll - 281.6) < 0.01,
+    'Pointer focus preserves strip position',
+  );
   await fs.writeFile(preferences, JSON.stringify({ show_weather: false }));
   const gradientDisabled = await scenario(
     'wallpaper-gradient-disabled',
