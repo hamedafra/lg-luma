@@ -2437,6 +2437,7 @@ impl State {
                     2 => self.preferences.reduced_motion = !self.preferences.reduced_motion,
                     8 => self.preferences.ui_sounds = !self.preferences.ui_sounds,
                     9 => self.preferences.text_hinting = !self.preferences.text_hinting,
+                    10 => self.preferences.system_font = !self.preferences.system_font,
                     4 => {
                         self.subpage = Some(Subpage::Language);
                         self.focus = Target::Choice(self.preferences.language.index());

@@ -13,10 +13,12 @@ use std::{cell::RefCell, collections::HashMap};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Hinting {
     Off,
-    /// Vertical only (FreeType `LIGHT`): baselines, x-height and horizontal stems.
-    Light,
-    /// Both axes (FreeType `NORMAL`): vertical stems as well.
+    /// Vertical only (FreeType `LIGHT`): baselines, x-height and horizontal stems. Glyphs keep
+    /// their designed widths, so spacing stays even, as in Chrome and LG's own Home.
     #[default]
+    Light,
+    /// Both axes (FreeType `NORMAL`): vertical stems as well. Moving stems sideways without
+    /// correcting the advances leaves uneven gaps ("Fon t hin ting"), so it is opt-in only.
     Normal,
 }
 

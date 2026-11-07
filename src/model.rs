@@ -255,6 +255,8 @@ pub struct Preferences {
     pub ui_sounds: bool,
     /// Grid-fit glyph outlines to the TV's 1080p pixel grid.
     pub text_hinting: bool,
+    /// Draw text in LG Smart UI from the TV's firmware instead of the bundled Inter.
+    pub system_font: bool,
 }
 
 impl Default for Preferences {
@@ -287,6 +289,7 @@ impl Default for Preferences {
             wallpaper_changed: 0,
             ui_sounds: true,
             text_hinting: true,
+            system_font: false,
         }
     }
 }

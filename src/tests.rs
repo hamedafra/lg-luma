@@ -150,6 +150,7 @@ fn scene(state: &State) -> view::Scene {
         root: PathBuf::new(),
         version: "test".into(),
         metrics: BTreeMap::new(),
+        system_metrics: None,
         artwork: crate::app_artwork::Service::new(false),
     };
     let navigation = view::navigation(&assets, state.preferences.language);
@@ -956,6 +957,11 @@ fn system_category_owns_refresh_and_quit_and_restores_sidebar_focus() {
     assert!(state.preferences.text_hinting);
     assert_eq!(state.activate(), vec![Effect::Save]);
     assert!(!state.preferences.text_hinting);
+    state.direction(Direction::Down, &controls(&state));
+    assert_eq!(state.focus, Target::Setting(10));
+    assert!(!state.preferences.system_font);
+    assert_eq!(state.activate(), vec![Effect::Save]);
+    assert!(state.preferences.system_font);
     state.direction(Direction::Down, &controls(&state));
     assert_eq!(state.focus, Target::Setting(5));
     assert_eq!(state.activate(), vec![Effect::Quit]);

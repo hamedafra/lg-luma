@@ -28,6 +28,8 @@ pub struct Assets {
     pub root: PathBuf,
     pub version: String,
     pub metrics: BTreeMap<String, BTreeMap<char, f32>>,
+    /// LG Smart UI's advances while the TV's own typeface is in use.
+    pub system_metrics: Option<Box<crate::system_font::Metrics>>,
     pub artwork: crate::app_artwork::Service,
 }
 impl Assets {
@@ -44,8 +46,26 @@ impl Assets {
             root,
             version,
             metrics,
+            system_metrics: None,
             artwork: crate::app_artwork::Service::new(webos),
         })
+    }
+
+    /// Measure with LG Smart UI's advances (Some) or the bundled Inter's (None).
+    pub fn set_system_metrics(&mut self, metrics: Option<crate::system_font::Metrics>) {
+        self.system_metrics = metrics.map(Box::new);
+    }
+
+    fn advances(&self, style: TextStyle) -> Option<&BTreeMap<char, f32>> {
+        if let Some(faces) = &self.system_metrics {
+            return Some(&faces[crate::system_font::face(style.weight)]);
+        }
+        let key = format!(
+            "{}{}",
+            if style.size >= 32. { "display-" } else { "" },
+            style.weight
+        );
+        self.metrics.get(&key)
     }
     fn path(&self, path: impl AsRef<Path>) -> String {
         self.root.join(path).to_string_lossy().into_owned()
@@ -73,12 +93,7 @@ impl Assets {
     }
 
     fn width(&self, value: &str, style: TextStyle) -> f32 {
-        let key = format!(
-            "{}{}",
-            if style.size >= 32. { "display-" } else { "" },
-            style.weight
-        );
-        let advances = self.metrics.get(&key);
+        let advances = self.advances(style);
         let fallback = self.metrics.get(if style.weight >= 500 {
             "fallback-500"
         } else {
@@ -114,12 +129,7 @@ impl Assets {
     }
 
     fn lines(&self, value: &str, style: TextStyle, width: f32) -> usize {
-        let key = format!(
-            "{}{}",
-            if style.size >= 32. { "display-" } else { "" },
-            style.weight
-        );
-        let advances = self.metrics.get(&key);
+        let advances = self.advances(style);
         let fallback = self.metrics.get(if style.weight >= 500 {
             "fallback-500"
         } else {
@@ -2752,6 +2762,17 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                     })),
                     false,
                 ),
+                (
+                    10,
+                    language.t("systemFont"),
+                    "type",
+                    Some(language.t(if state.preferences.system_font {
+                        "stateOn"
+                    } else {
+                        "stateOff"
+                    })),
+                    false,
+                ),
                 (5, language.t("quitApp"), "power", None, false),
             ]
             .into_iter()
@@ -3702,8 +3723,24 @@ mod tests {
                     BTreeMap::from([('界', 1.), ('한', 1.)]),
                 ),
             ]),
+            system_metrics: None,
             artwork: crate::app_artwork::Service::new(false),
         }
+    }
+
+    #[test]
+    fn layout_measures_with_lg_smart_ui_while_it_is_in_use() {
+        let mut assets = assets();
+        let style = text(10., 500, 0.);
+        assert_eq!(assets.width("W", style), 12.);
+        let mut faces: crate::system_font::Metrics = Default::default();
+        faces[crate::system_font::face(500)].insert('W', 0.5);
+        assets.set_system_metrics(Some(faces));
+        assert_eq!(assets.width("W", style), 5.);
+        // Characters LG Smart UI lacks still measure with the bundled fallback.
+        assert_eq!(assets.width("界", style), 10.);
+        assets.set_system_metrics(None);
+        assert_eq!(assets.width("W", style), 12.);
     }
 
     #[test]

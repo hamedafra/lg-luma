@@ -403,11 +403,23 @@ steps. **Settings → System → Text rendering** offers **MSAA** (4× with 2×/
 fallbacks, no emboldening) and **Analytic (default)**.
 
 **Font hinting** (Settings → System, on by default) grid-fits each glyph with skrifa's automatic
-hinter (FreeType `NORMAL` equivalent) at its physical pixel size; glyph geometry and text runs are
-cached per size and density while it is on. `LUMA_HINTING=off|light|normal` overrides the saved
-choice for hardware comparisons. The `text_rendering` preference (`msaa` or `analytic`)
-is saved immediately and applies when Luma next starts because SDL selects MSAA when it creates
-the window. Missing or invalid preferences use MSAA. The setting shows a restart reminder.
+hinter at its physical pixel size, vertically only (FreeType `LIGHT` equivalent, as Chrome and
+LG's Flutter Home do); glyph geometry and text runs are cached per size and density while it is
+on. Two-axis `NORMAL` hinting moves stems sideways without correcting advances, which leaves
+uneven letter gaps, so it is only available through `LUMA_HINTING=off|light|normal`, which
+overrides the saved choice for hardware comparisons. The `text_rendering` preference (`msaa` or
+`analytic`) is saved immediately and applies when Luma next starts because SDL selects MSAA when
+it creates the window. Missing or invalid preferences use Analytic. The setting shows a restart
+reminder.
+
+**LG system font** (Settings → System, off by default) swaps the bundled Inter for LG Smart UI,
+loaded from the TV's `/usr/share/fonts` at runtime and never packaged (`src/system_font.rs`). Its
+four static faces stand in for Luma's weights (≤375 Light, ≤475 Regular, ≤675 SemiBold, else
+Bold; LG's Home sets most text in SemiBold). Layout measures with advances read from the same
+files, so the renderer and `Assets::width` agree; characters the face lacks fall back to the
+bundled CJK/Hangul fonts as before. When any face is missing Luma keeps Inter. For desktop
+previews, copy the four `LG_Smart_UI-{Light,Regular,SemiBold,Bold}.ttf` files from a TV and set
+`LUMA_SYSTEM_FONTS=<directory>`.
 
 Analytic mode uses a single-sample window and analytic text/logo edge filters. Text up to 16
 physical pixels is emboldened by 0.25 px per edge, fading out by 28 px. The choice is visual:

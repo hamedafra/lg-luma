@@ -477,6 +477,7 @@ fn grid_and_options_use_matching_adaptive_hearts_without_a_backing_circle() {
             root: PathBuf::new(),
             version: "test".into(),
             metrics: Default::default(),
+            system_metrics: None,
             artwork: Service::with_loader(true, move |_| {
                 decode(&encoded(ImageFormat::Png, 32, 32, pixel))
             }),
@@ -545,6 +546,7 @@ fn visible_cards_switch_from_fallback_to_a_single_composited_installed_surface()
         root: PathBuf::new(),
         version: "test".into(),
         metrics: Default::default(),
+        system_metrics: None,
         artwork: Service::with_loader(true, |_| {
             decode(&encoded(ImageFormat::Png, 32, 32, [24, 40, 56, 255]))
         }),

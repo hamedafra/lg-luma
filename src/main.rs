@@ -26,6 +26,7 @@ mod scroll_preview;
 mod sdl_events;
 mod state;
 mod storage;
+mod system_font;
 mod text_rendering;
 #[path = "tile-editor.rs"]
 mod tile_editor;
@@ -664,7 +665,7 @@ fn run() -> Result<(), String> {
         None if webos => platform::install_dir()?.join("assets"),
         None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".build/assets"),
     };
-    let assets = view::Assets::load(root, webos)?;
+    let mut assets = view::Assets::load(root, webos)?;
     startup_stage("asset metadata");
     let default_preferences = options
         .preferences
@@ -833,6 +834,8 @@ fn run() -> Result<(), String> {
         eprintln!("VSync: {error}");
     }
     let hinting_override = std::env::var("LUMA_HINTING").ok();
+    // Which typeface the renderer and layout use; None until the first frame decides.
+    let mut system_font_applied: Option<bool> = None;
     let mut renderer =
         renderer::Renderer::new(&assets.root.join("font.ttf"), webos, text_config.embolden)?;
     startup_stage("renderer");
@@ -1774,6 +1777,27 @@ fn run() -> Result<(), String> {
                     .profile_frames
                     .is_some_and(|limit| presented + 1 >= limit));
         if ((state.dirty || options.profile_frames.is_some()) && visible) || final_frame {
+            // Layout measures with the same typeface the renderer draws, so switch both first.
+            let mut refonted = false;
+            if system_font_applied != Some(state.preferences.system_font) {
+                system_font_applied = Some(state.preferences.system_font);
+                let directory = state
+                    .preferences
+                    .system_font
+                    .then(system_font::directory)
+                    .flatten();
+                let metrics = directory.as_deref().and_then(|directory| {
+                    system_font::metrics(directory)
+                        .map_err(|error| eprintln!("LG Smart UI: {error}"))
+                        .ok()
+                });
+                let directory = directory.filter(|_| metrics.is_some());
+                if state.preferences.system_font && directory.is_none() {
+                    eprintln!("LG Smart UI is not on this device; keeping the bundled font");
+                }
+                assets.set_system_metrics(metrics);
+                refonted = renderer.set_system_fonts(directory);
+            }
             let compose_started = Instant::now();
             scene = compose(&mut state, &assets, pill, pill_width, now);
             let compose_ms = compose_started.elapsed().as_secs_f64() * 1000.;
@@ -1784,7 +1808,7 @@ fn run() -> Result<(), String> {
                     state.preferences.text_hinting,
                     hinting_override.as_deref(),
                 ));
-                if rehinted {
+                if rehinted || refonted {
                     damage_tracker.reset();
                 }
                 if final_frame && let Some(path) = &options.screenshot {

@@ -362,13 +362,14 @@ try {
   assert.deepEqual(clockFocus.focus, { Choice: 1 });
   const system = await scenario(
     'system-settings',
-    'settings,down,down,down,down,right,down,down,down,down',
+    'settings,down,down,down,down,right,down,down,down,down,down',
   );
   assert.deepEqual(system.focus, { Setting: 5 });
   assert.ok(system.ui_text.includes('Refresh apps & inputs'));
   assert.ok(!system.ui_text.includes('Luma update'));
   assert.ok(system.ui_text.includes('Quit app'));
   assert.ok(system.ui_text.includes('Text rendering'));
+  assert.ok(system.ui_text.includes('LG system font'));
   const updatePreview = await scenario('update-preview', 'settings,down,down,down,down,right', [
     '--test-update-version',
     '99.0.0',
@@ -495,18 +496,16 @@ try {
     preferences,
     JSON.stringify({ favorites: edgeFavorites, show_weather: false }),
   );
-  const edgeRight = await scenario('favorites-edge-right', 'home,click:1860:600');
+  const edgeRight = await scenario('favorites-edge-right', 'home,click:1860:664');
   assert.deepEqual(edgeRight.focus, { App: edgeFavorites[6] });
   assert.equal(edgeRight.home_scroll, 0, 'Clicking the fragment must not move it');
   const edgeLeft = await scenario(
     'favorites-edge-left',
-    `home,down,${Array(6).fill('right').join(',')},click:40:600`,
+    `home,down,${Array(6).fill('right').join(',')},click:40:664`,
   );
-  assert.deepEqual(edgeLeft.focus, { App: edgeFavorites[0] });
-  assert.ok(
-    Math.abs(edgeLeft.home_scroll - 281.6) < 0.01,
-    'Pointer focus preserves strip position',
-  );
+  // With the pointer in use, the left margin (fragment included) is the row's back arrow.
+  assert.deepEqual(edgeLeft.focus, { StripArrow: { inputs: false, forward: false } });
+  assert.equal(edgeLeft.home_scroll, 0, 'The back arrow pages the row to its start');
   await fs.writeFile(preferences, JSON.stringify({ show_weather: false }));
   const gradientDisabled = await scenario(
     'wallpaper-gradient-disabled',

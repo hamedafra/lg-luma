@@ -3823,5 +3823,20 @@
     "vi": "Căn chỉnh phông chữ",
     "nl": "Font-hinting",
     "sv": "Teckensnittshinting"
+  },
+  "systemFont": {
+    "zh-tw": "LG 系統字型",
+    "en": "LG system font",
+    "de": "LG-Systemschrift",
+    "es": "Fuente del sistema LG",
+    "zh": "LG 系统字体",
+    "pt": "Fonte do sistema LG",
+    "it": "Carattere di sistema LG",
+    "ru": "Системный шрифт LG",
+    "pl": "Czcionka systemowa LG",
+    "fr": "Police système LG",
+    "vi": "Phông chữ hệ thống LG",
+    "nl": "LG-systeemlettertype",
+    "sv": "LG:s systemtypsnitt"
   }
 }

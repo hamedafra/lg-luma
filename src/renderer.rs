@@ -334,6 +334,8 @@ pub struct Renderer {
     vao: GLuint,
     white: Texture,
     font_directory: PathBuf,
+    /// LG Smart UI from the TV's firmware in place of the bundled Inter, when chosen.
+    system_fonts: Option<PathBuf>,
     fonts: HashMap<u16, Font>,
     failed_fonts: HashSet<u16>,
     /// Character, font and hinted physical size in 1/64 px (0 when unhinted).
@@ -457,6 +459,7 @@ impl Renderer {
             vao,
             white,
             font_directory: directory.into(),
+            system_fonts: None,
             fonts,
             failed_fonts: HashSet::new(),
             glyphs: HashMap::new(),
@@ -489,7 +492,19 @@ impl Renderer {
         if self.failed_fonts.contains(&id) {
             return false;
         }
-        match load_font(&self.font_directory, id) {
+        let system = self
+            .system_fonts
+            .as_deref()
+            .filter(|_| id < 2000)
+            .map(|directory| crate::system_font::path(directory, id % 1000));
+        let loaded = match system {
+            Some(path) => load_font_file(&path).or_else(|error| {
+                eprintln!("{error}; using the bundled font");
+                load_font(&self.font_directory, id)
+            }),
+            None => load_font(&self.font_directory, id),
+        };
+        match loaded {
             Ok(font) => {
                 self.fonts.insert(id, font);
                 true
@@ -500,6 +515,20 @@ impl Renderer {
                 false
             }
         }
+    }
+
+    /// Switching between the bundled and the TV's own typeface rebuilds every text run.
+    pub fn set_system_fonts(&mut self, directory: Option<PathBuf>) -> bool {
+        if self.system_fonts == directory {
+            return false;
+        }
+        self.system_fonts = directory;
+        // The CJK and Hangul fallbacks (ids 2000+) are bundled either way.
+        self.fonts.retain(|id, _| *id >= 2000);
+        self.failed_fonts.clear();
+        self.glyphs.clear();
+        self.text_runs.clear();
+        true
     }
 
     /// Switching grid fitting rebuilds every glyph and text run on next use.
@@ -1763,14 +1792,17 @@ fn load_font(directory: &Path, id: u16) -> Result<Font, String> {
     } else {
         format!("font-{id}.ttf")
     };
-    let path = directory.join(&name);
+    load_font_file(&directory.join(&name)).map_err(|e| format!("{e}. Regenerate native assets."))
+}
+
+fn load_font_file(path: &Path) -> Result<Font, String> {
     let started = Instant::now();
-    let bytes = std::fs::read(&path)
-        .map_err(|e| format!("Font {}: {e}. Regenerate native assets.", path.display()))?;
+    let bytes = std::fs::read(path).map_err(|e| format!("Font {}: {e}", path.display()))?;
     let font = Font::from_bytes(bytes).map_err(|e| format!("Font {}: {e}", path.display()))?;
     if cfg!(feature = "webos") {
         eprintln!(
-            "Luma font: {name} loaded in {} ms",
+            "Luma font: {} loaded in {} ms",
+            path.display(),
             started.elapsed().as_millis()
         );
     }

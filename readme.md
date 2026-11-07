@@ -263,8 +263,12 @@ not.
 
 The TV draws every app's interface at 1920×1080 and scales it up to the 4K panel, so soft text
 edges become visible. Luma grid-fits glyph outlines to the pixel grid (**Settings → System → Font
-hinting**, on by default) and uses smooth analytic edge coverage by default (**Text rendering →
-Analytic**); 4× MSAA remains available.
+hinting**, on by default; vertical only, so letter spacing stays even) and uses smooth analytic
+edge coverage by default (**Text rendering → Analytic**); 4× MSAA remains available.
+
+**Settings → System → LG system font** draws Luma's text in LG Smart UI, the typeface of LG's own
+Home, instead of the bundled Inter. Luma reads it from the TV's firmware (`/usr/share/fonts`) and
+never ships it; scripts it lacks still use the bundled fonts, and a TV without it keeps Inter.
 
 ### Navigation sounds
 
